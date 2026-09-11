@@ -988,7 +988,7 @@ Every major engineering decision was based on testing, analysis, and continuous 
 | Custom PCB | Organized electronics | Improved maintenance |
 | 3D Printed Mounts | Fixed sensor position | Better measurements |
 | Modular Software | Independent modules | Easier development |
-| Dual PD Controller | Adaptive driving behavior | Better stability |
+| Corridor PID Controller | Adaptive driving behavior | Better stability |
 
 
 ---
