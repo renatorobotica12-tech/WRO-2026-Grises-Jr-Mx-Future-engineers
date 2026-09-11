@@ -26,7 +26,7 @@
 
 ---
 
-* **Port 1:** HiTechnic EV3 HSDV sensor
+* **Port 1:** HiTechnic Ev3 nxt 2.0 color sensor 
 * **Port 2:** Camera connection
 * **Port 3:** Gyroscope
 * **Port 4:** I²C connection
