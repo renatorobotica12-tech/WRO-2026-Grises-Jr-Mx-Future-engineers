@@ -20,3 +20,9 @@ The closed-loop controller was tuned iteratively on the official track using a s
 Starting with **Test 6**, it was determined that the integral gain ($K_i$) should be maintained at **0.00001**. This decision was primarily driven by the occurrence of **integral windup**. Because the corners generate a sustained tracking error for short periods of time, the integral term accumulates error and produces unnecessary additional steering torque. This causes the Ackermann steering mechanism to deviate from its intended geometric response, ultimately compromising the overall stability of the prototype.
 
 Therefore, a low but non-zero integral gain of **$K_i = 0.00001$** was selected as the final value, providing limited compensation for accumulated tracking error while minimizing the risk of excessive integral accumulation and actuator saturation.
+
+
+## 📑 Notes
+However, the tuning process did not end with these ten iterations. We continued applying the same systematic methodology, performing additional tuning rounds to further refine the controller's performance. The ten tests presented above represent only a representative portion of the tuning process; in total, we conducted approximately **40–50 additional iterations**, continuously adjusting the PID gains and evaluating the robot's trajectory, stability, and performance at different speeds.
+
+This extended iterative process allowed us to progressively identify the limitations of the controller and converge toward a more reliable set of parameters for the final implementation.
