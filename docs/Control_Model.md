@@ -4,92 +4,137 @@
 
 **Los Grises Jr — WRO 2026 Future Engineers**
 
-*Every constant in this document is traceable to a measurement on the
-robot or to a line in `Src/ev3dev/wro/config.py`.*
+*Sensor fusion · Error · Control law · Kinematics · Torque · Steering geometry*
+
+Every constant here is traceable either to a measurement on the robot or
+to a line in [`Src/ev3dev/wro/config.py`](../Src/ev3dev/wro/config.py).
+Where a value is an estimate rather than a measurement, it says so.
 
 </div>
 
 ---
 
-## 📐 1. Wall-Centring Geometry
+## 🚗 1. Vehicle Parameters
 
-### 1.1 Why four sensors and not two
+| Parameter | Symbol | Value |
+|:---|:---:|---:|
+| Mass | $m$ | **861 g** = 0.861 kg |
+| Overall dimensions | — | 24 × 23 × 18 cm |
+| Wheel diameter | $D$ | 56.0 mm |
+| Wheel radius | $r$ | 28.0 mm = 0.028 m |
+| Wheel circumference | $C$ | 175.93 mm |
+| Wheelbase | $L_b$ | 24.0 cm |
+| Track width | $W_t$ | 18.0 cm |
+| Motor encoder resolution | — | 1° |
+| Drive motor | — | EV3 Medium, port B |
+| Steering motor | — | EV3 Medium, port A |
 
-The robot carries two ultrasonic sensors per side: one perpendicular to
-the chassis (90°) and one angled 25° from perpendicular.
+$$C = \pi D = \pi \times 56.0 = 175.93\ \text{mm}$$
 
-Let the corridor width be $W = 100\ \text{cm}$ and let $d$ be the robot's
-lateral displacement from the centre line, positive towards the left
-wall.
+---
+
+## 📐 2. Wall-Centring Geometry
+
+### 2.1 Sensor layout
+
+Four lateral ultrasonic sensors, two per side: one perpendicular to the
+chassis (90°) and one angled. A fifth sensor faces forward and is read
+but not used in any control decision.
+
+Let the corridor width be $W = 100\ \text{cm}$ and let $d$ be the lateral
+displacement from the centre line, positive towards the left wall.
 
 The perpendicular sensors measure:
 
 $$r_{90}^{L} = \frac{W}{2} - d \qquad r_{90}^{R} = \frac{W}{2} + d$$
 
-The angled sensors measure along a beam tilted 25°, so their range is the
-perpendicular distance divided by $\cos 25°$:
+The angled sensors measure along a tilted beam, so their range is the
+perpendicular distance divided by the cosine of the tilt from
+perpendicular:
 
-$$r_{25}^{L} = \frac{1}{\cos 25°}\left(\frac{W}{2} - d\right) \qquad
-r_{25}^{R} = \frac{1}{\cos 25°}\left(\frac{W}{2} + d\right)$$
+$$r_{\theta} = \frac{1}{\cos\theta}\cdot r_{90}$$
 
-with $\dfrac{1}{\cos 25°} = 1.103$.
+### 2.2 The error signal
 
-### 1.2 The error signal
+Each side is summed, and the error is the negated difference between
+sides:
 
-Each side is summed, and the error is the negated difference:
+$$e = -\Big[(r_{90}^{L} + r_{\theta}^{L}) - (r_{\theta}^{R} + r_{90}^{R})\Big]$$
 
-$$e = -\Big[(r_{90}^{L} + r_{25}^{L}) - (r_{25}^{R} + r_{90}^{R})\Big]$$
+$$\boxed{\;e = 2\left(1 + \frac{1}{\cos\theta}\right) d\;}$$
 
-Substituting:
+The error is a **multiple of the physical displacement**, and that
+multiple depends on the mounting angle:
 
-$$e = -\Big[(1 + 1.103)\left(\tfrac{W}{2} - d\right) - (1 + 1.103)\left(\tfrac{W}{2} + d\right)\Big]$$
+| Tilt from perpendicular | $1/\cos\theta$ | $e / d$ |
+|:---:|:---:|:---:|
+| 25° | 1.103 | **4.21** |
+| 45° | 1.414 | **4.83** |
 
-$$\boxed{\;e = 2\,(1 + 1.103)\; d = 4.21\,d\;}$$
-
-**The error is about 4.2 times the physical displacement.** All four
-sensors move at once — two approach the wall while two recede — so their
-contributions add rather than cancel.
+All four sensors move at once — two approach the wall while two recede —
+so their contributions add rather than cancel. This is why the error
+grows several times faster than the displacement, and why the
+proportional gain looks small next to the numbers involved.
 
 > [!IMPORTANT]
-> **Verification.** The model predicts $e = 42$ for a 10 cm displacement.
-> Measured on track, a 10 cm displacement produces an error of
-> approximately 40. The 5 % difference is consistent with the sensors'
-> own tolerance.
+> **Verification.** At 25° the model predicts $e = 42$ for a 10 cm
+> displacement. Measured on track, a 10 cm displacement produces an error
+> of approximately 40 — within 5 %, consistent with sensor tolerance.
 
-### 1.3 Why the negation
+> [!WARNING]
+> **Open item: the mounting angle needs re-measuring.**
+> `config.py` names the angled sensors as **25°**, and the 25° figure is
+> what matches the track measurement above. An earlier version of this
+> document stated 45°. The two differ by 15 % in $e/d$, which propagates
+> into every gain figure below. **Measure the physical mount angle and
+> settle it.**
+
+### 2.3 Why the negation matters
 
 If the robot drifts towards the **left** wall, $d > 0$, the left readings
 fall, and $e$ comes out **positive**. A positive steering command turns
-**right**, away from the wall. The sign closes the loop; without the
-negation the robot would steer into the wall it is already approaching.
+**right**, away from the wall.
+
+The sign is what closes the loop. Without the negation the robot would
+steer into the wall it is already approaching.
+
+### 2.4 Decomposing a diagonal reading
+
+A diagonal sensor's range can be split into lateral and forward
+components:
+
+$$Y_{\text{wall}} = D_{\text{diag}}\cdot\cos\theta \qquad
+X_{\text{forward}} = D_{\text{diag}}\cdot\sin\theta$$
+
+with $\theta$ the tilt from perpendicular. This is what makes the angled
+sensors useful: the forward component means they see a corner slightly
+before the perpendicular pair does.
 
 ---
 
-## 🎮 2. The Wall-Centring Controller
+## 🎮 3. The Wall-Centring Controller
 
-### 2.1 Control law
+### 3.1 Control law
 
 $$\delta = \mathrm{clamp}\big(K_p \cdot e,\; -L_{\text{izq}},\; +L_{\text{der}}\big)$$
 
-where $\delta$ is the steering angle in motor degrees relative to centre,
-$K_p$ is the proportional gain, and $L$ is the per-side steering limit.
+where $\delta$ is the steering angle in motor degrees relative to centre.
 
 **There is no derivative or integral term.** That is a measured decision,
-not an omission: the tuning log in
-[`Logs_Tuning.md`](Logs_Tuning.md) records the integral term saturating
-the steering actuator on track imperfections.
+not an omission. The tuning log in [`Logs_Tuning.md`](Logs_Tuning.md)
+records the integral term saturating the steering actuator on track
+imperfections — corners generate a sustained error for a short period,
+the integral accumulates it, and the steering deviates from its
+geometric response.
 
-### 2.2 Saturation: what the gain actually means
+### 3.2 Saturation: what the gain actually means
 
 A proportional controller is only meaningful up to the point where it
-saturates. That point is:
+saturates:
 
-$$e_{\text{sat}} = \frac{L}{K_p}$$
-
-and, using the geometry of §1.2, the physical displacement that causes
-saturation:
-
-$$d_{\text{sat}} = \frac{e_{\text{sat}}}{4.21} = \frac{L}{4.21\,K_p}$$
+$$e_{\text{sat}} = \frac{L}{K_p}
+\qquad\qquad
+d_{\text{sat}} = \frac{e_{\text{sat}}}{4.21} = \frac{L}{4.21\,K_p}$$
 
 With the measured limit $L = 50.6°$:
 
@@ -101,51 +146,213 @@ With the measured limit $L = 50.6°$:
 | 0.47 | 107 | — | Never saturates in a 1 m corridor |
 
 `config.py` computes $e_{\text{sat}}$ automatically as
-`VOLANTE_ERROR_TOPE`, so the meaning of the gain sits next to the gain
-itself.
+`VOLANTE_ERROR_TOPE`, so the meaning of a gain sits next to the gain.
 
-> [!WARNING]
+> [!CAUTION]
 > **A gain can silently compensate for broken hardware.** We ran
-> $K_p = 10$ for a period while one ultrasonic sensor was dead. With that
-> sensor's readings substituted by the filter, the error sat at a
-> constant $+62$ — nearly four times the saturation point — and the
-> steering was pinned at full lock regardless of the walls. The gain was
-> masking the fault, not solving it. After repair the true operating
-> error was 5 to 9, and $K_p = 10$ saturated permanently.
+> $K_p = 10$ while one ultrasonic sensor was dead. With its readings
+> substituted by the filter, the error sat at a constant $+62$ — nearly
+> four times the saturation point — and the steering was pinned at full
+> lock regardless of the walls. After repair the true operating error was
+> 5 to 9, and $K_p = 10$ saturated permanently. **The gain had been
+> masking the fault.**
 
-### 2.3 Speed and correction distance
+### 3.3 Speed and correction distance
 
 At loop rate $f$ and forward speed $v$, the robot travels
 
 $$\Delta s = \frac{v}{f}$$
 
-between consecutive steering updates. With the measured $f \approx 30\ \text{Hz}$,
-each correction covers 33 ms of travel. Raising $v$ without raising $f$
-increases $\Delta s$, which is why a faster robot needs a higher gain for
-the same correction to arrive in time — and why, past a point, weaving is
-a symptom of the loop rate rather than the gain.
+between consecutive steering updates. At the measured
+$f \approx 30\ \text{Hz}$, each correction covers 33 ms of travel.
+Raising $v$ without raising $f$ increases $\Delta s$, which is why a
+faster robot needs more gain for the same correction to arrive in time —
+and why, past a point, weaving is a symptom of the loop rate rather than
+of the gain.
 
 ---
 
-## 👁 3. Camera Avoidance
+## ⚙️ 4. Motor Kinematics and Linear Displacement
 
-### 3.1 Image coordinates
+### 4.1 Distance from motor angle
 
-The HuskyLens reports a bounding box in a $320 \times 240$ image. The
+$$d = \frac{\theta}{360°}\cdot C$$
+
+$$\frac{C}{360} = \frac{175.93}{360} = 0.4887\ \text{mm/degree}$$
+
+$$\theta = \frac{d}{0.4887}$$
+
+The encoder resolves 1°, so the theoretical position quantum is
+**0.49 mm** of wheel travel. That is the floor on odometric precision
+before slip is considered.
+
+### 4.2 Speed command to linear velocity
+
+Speed is commanded as a percentage of the motor maximum:
+
+$$\omega_{\text{cmd}} = \frac{v_{\%}}{100}\,\omega_{\max},
+\qquad \omega_{\max} = 1560\ °/\text{s}$$
+
+Converting to linear wheel speed:
+
+$$v = \frac{\omega_{\text{cmd}}}{360}\cdot C$$
+
+| $v_\%$ | $\omega_{\text{cmd}}$ | $v$ at the wheel |
+|---:|---:|---:|
+| 40 | 624 °/s | 0.305 m/s |
+| 50 | 780 °/s | 0.381 m/s |
+| 70 | 1092 °/s | 0.534 m/s |
+| 100 | 1560 °/s | 0.763 m/s |
+
+> [!NOTE]
+> These assume direct drive from motor to wheel. Any gear reduction
+> scales them down proportionally, and should be measured rather than
+> assumed.
+
+---
+
+## 🔩 5. Torque, Traction and Acceleration
+
+### 5.1 Available force
+
+The EV3 Medium Motor has a reference running torque of
+$\tau = 8\ \text{N·cm} = 0.08\ \text{N·m}$ and a stall torque of
+$0.12\ \text{N·m}$. Stall torque is a blocked-rotor figure, not a driving
+condition.
+
+$$F = \frac{\tau}{r} = \frac{0.08}{0.028} \approx 2.86\ \text{N}$$
+
+### 5.2 What the mass makes of it
+
+With $m = 0.861\ \text{kg}$:
+
+$$a_{\max} = \frac{F}{m} = \frac{2.86}{0.861} \approx 3.32\ \text{m/s}^2$$
+
+$$W = mg = 0.861 \times 9.81 \approx 8.45\ \text{N}$$
+
+### 5.3 The slip condition
+
+Tractive force cannot exceed what friction can transmit:
+
+$$F \le \mu\,N$$
+
+Taking the full weight on the driven axle as an upper bound:
+
+$$\mu_{\text{required}} \ge \frac{F}{W} = \frac{2.86}{8.45} \approx 0.34$$
+
+Rubber on a smooth competition surface typically gives $\mu$ well above
+0.34, so the robot should be **torque-limited rather than
+traction-limited** under normal acceleration.
+
+> [!IMPORTANT]
+> The rear-wheel-drive layout puts only part of the mass on the driven
+> axle, which raises the effective $\mu$ required. This was observed at
+> the highest speeds tested, where the chassis began to drift on rear-tyre
+> slip — the ideal kinematic model stops being accurate there.
+
+### 5.4 Time to reach speed
+
+$$t = \frac{v}{a_{\max}}$$
+
+| Target | $v$ | $t$ (ideal) |
+|---:|---:|---:|
+| $v_\% = 40$ | 0.305 m/s | 0.09 s |
+| $v_\% = 70$ | 0.534 m/s | 0.16 s |
+
+These are upper-bound figures: they ignore drivetrain losses, rolling
+resistance and the motor's own speed-torque curve, all of which reduce
+available torque as speed rises.
+
+---
+
+## 🔄 6. Steering Geometry
+
+### 6.1 Ackermann condition
+
+With wheelbase $L_b$ and track width $W_t$, for a commanded steering
+angle $\alpha$ the inner and outer wheels must take different angles to
+share a turning centre:
+
+$$\delta_{\text{inner}} = \arctan\!\left(\frac{L_b}{\dfrac{L_b}{\tan\alpha} - \dfrac{W_t}{2}}\right)
+\qquad
+\delta_{\text{outer}} = \arctan\!\left(\frac{L_b}{\dfrac{L_b}{\tan\alpha} + \dfrac{W_t}{2}}\right)$$
+
+The turning radius measured to the centre of the rear axle is
+
+$$R = \frac{L_b}{\tan\alpha}$$
+
+With $L_b = 24.0\ \text{cm}$ and $W_t = 18.0\ \text{cm}$:
+
+| $\alpha$ | $R$ | $\delta_{\text{inner}}$ | $\delta_{\text{outer}}$ |
+|---:|---:|---:|---:|
+| 10° | 136 cm | 10.7° | 9.4° |
+| 20° | 66 cm | 22.0° | 18.4° |
+| 30° | 42 cm | 34.0° | 26.9° |
+
+Satisfying this geometry is what stops the inner wheel from scrubbing
+through a turn.
+
+> [!WARNING]
+> **Open item: $L_b$ and $W_t$ need re-measuring.** The values above,
+> 24.0 cm and 18.0 cm, are identical to the robot's overall **length** and
+> **height** from the specification table (24 × 23 × 18 cm). Wheelbase is
+> measured axle to axle and is necessarily shorter than the vehicle;
+> track width is measured between wheel centres. These figures appear to
+> have been taken from the bounding box rather than from the chassis.
+
+### 6.2 Steering travel measurement
+
+The steering is driven against both mechanical stops. Two distinct
+quantities result:
+
+| Quantity | Measured | Meaning |
+|:---|---:|:---|
+| $T_{\text{forced}}$ | $153°$ | Stop to stop at 100 % duty |
+| $T_{\text{free}}$ | $119°$ | Reached at minimum duty |
+
+The difference of $34°$ is **not steering**. It is the mechanism flexing
+against the stops under load; it does not become wheel angle.
+
+### 6.3 Deriving the limit
+
+$$L = \frac{T_{\text{free}}}{2}\times 0.85 = \frac{119}{2}\times 0.85 = 50.6°$$
+
+The factor 0.85 leaves a 15 % margin so the steering does not strike its
+stops on every correction. Taking the limit from $T_{\text{forced}}$
+would give $65°$, and the steering would spend the race fighting its own
+end stops.
+
+### 6.4 Centre and per-side limits
+
+$$c = \frac{p_{+} + p_{-}}{2}$$
+
+the midpoint of the two forced extremes. The forced travel is used
+because both ends are reached the same way; the free ends are reached one
+from centre and one from a stop, and are therefore not symmetric.
+
+$$L_{\text{der}} = L\,f_{\text{der}} \qquad L_{\text{izq}} = L\,f_{\text{izq}}
+\qquad f \in [0,1]$$
+
+Expressing the clamp as a fraction keeps $L$ as the mechanical ceiling and
+the fractions as the tuning knob, so re-measuring the mechanism rescales
+both sides automatically.
+
+---
+
+## 👁 7. Camera Avoidance
+
+### 7.1 Image coordinates
+
+The HuskyLens reports a bounding box in a $320\times 240$ image. The
 horizontal coordinate is re-centred:
 
-$$X = X_{\text{raw}} - 160 \qquad X \in [-160,\, +160]$$
+$$X = X_{\text{raw}} - 160 \qquad X \in [-160,\,+160]$$
 
-so $X < 0$ is left of frame centre and $X > 0$ is right.
+### 7.2 Control law
 
-### 3.2 Control law
+$$\delta_{\text{cam}} = \mathrm{clamp}\!\left(\frac{L}{160}\,(X - X_{\text{target}}),\;\text{lo},\;\text{hi}\right)$$
 
-The controller drives the block towards a **target position in the
-image**, one per colour:
-
-$$\delta_{\text{cam}} = \mathrm{clamp}\!\left(\frac{L}{160}\,(X - X_{\text{target}}),\; \text{lo},\; \text{hi}\right)$$
-
-The gain is fixed by geometry rather than tuned:
+The gain is fixed by geometry, not tuned:
 
 $$\frac{L}{160} = \frac{50.6}{160} = 0.316\ \text{degrees per pixel}$$
 
@@ -155,32 +362,25 @@ $$\frac{L}{160} = \frac{50.6}{160} = 0.316\ \text{degrees per pixel}$$
 | Green | 2 | $+150$ | Right of frame | **Left** of the pillar |
 
 The inversion is not a sign error. The camera looks where the robot is
-**going**: to leave a pillar on your left, you must be pointing to the
-right of it.
+**going**: to leave a pillar on your left, you must point to the right of
+it.
 
-### 3.3 Why the target must lie inside ±160
+### 7.3 Why the target must lie inside ±160
 
-The block's position is bounded by the image: $|X| \le 160$. For the
-controller to converge, there must exist a reachable $X$ with
+For the controller to converge there must exist a reachable $X$ with
 $\delta_{\text{cam}} = 0$, which requires
 
 $$\boxed{\;|X_{\text{target}}| \le 160\;}$$
 
 If $X_{\text{target}} = 180$, then even at the extreme $X = 160$:
 
-$$\delta_{\text{cam}} = 0.316 \times (160 - 180) = -6.3°$$
+$$\delta_{\text{cam}} = 0.316\,(160-180) = -6.3°$$
 
-The steering never straightens while the block is in view. It keeps
-turning until the pillar leaves the frame — which with a wide-angle lens
-takes a long time.
+The steering never straightens while the block is in view. At
+$X_{\text{target}} = 150$ the proportional band covers
+$X \in [-10,\,150]$ and the loop closes at $X = 150$.
 
-At $X_{\text{target}} = 150$ the proportional band is
-$X \in [-10,\, 150]$, covering most of the image, and the loop closes at
-$X = 150$.
-
-### 3.4 Measured convergence
-
-A single avoidance, sampled at 4 Hz:
+### 7.4 Measured convergence
 
 | $X$ | $\delta_{\text{cam}}$ |
 |---:|---:|
@@ -190,33 +390,28 @@ A single avoidance, sampled at 4 Hz:
 | $+139$ | $-0.3$ |
 | $+143$ | $+0.9$ |
 
-$X$ climbs monotonically towards the target, $\delta$ shrinks to zero and
-crosses sign. The loop closes as the model predicts.
+$X$ climbs monotonically to the target, $\delta$ shrinks to zero and
+crosses sign. The loop closes as predicted.
 
 ---
 
-## 📡 4. Sensor Dropout Filtering
+## 📡 8. Sensor Dropout Filtering
 
-### 4.1 The sentinel problem
+### 8.1 The sentinel problem
 
-When a sensor receives no echo the firmware reports $125$ and clears its
-validity bit. **125 is a sentinel, not a distance.**
-
-If it is treated as a distance, a dropout on one side changes that side's
-sum by
+With no echo, the firmware reports $125$ and clears the sensor's validity
+bit. **125 is a sentinel, not a distance.** Treated as one, a dropout
+changes that side's sum by
 
 $$\Delta = 125 - r_{\text{actual}}$$
 
-With a typical $r_{\text{actual}} \approx 20\ \text{cm}$, that is
-$\Delta \approx 105$ — more than six times $e_{\text{sat}}$ at
-$K_p = 3$. The steering goes to full lock instantly.
+With a typical $r_{\text{actual}} \approx 20\ \text{cm}$ that is
+$\Delta \approx 105$, over six times $e_{\text{sat}}$ at $K_p = 3$.
 
 **Measured with the robot standing still:** the error swung from $+5$ to
 $-82$ and back to $+31$ in under one second.
 
-### 4.2 The three-state filter
-
-Per sensor, with $t_g$ the time of the last good reading:
+### 8.2 The three-state filter
 
 $$
 r_{\text{used}} =
@@ -227,80 +422,66 @@ r_{\max} & t - t_g > T_{\text{hold}}
 \end{cases}
 $$
 
-with $T_{\text{hold}} = 0.5\ \text{s}$ and $r_{\max} = 100\ \text{cm}$.
+with $T_{\text{hold}} = 0.5\ \text{s}$ and $r_{\max} = 100\ \text{cm}$,
+followed by a rolling median of three.
 
-A rolling median of three then removes isolated spikes that arrive with
-their validity bit set.
-
-### 4.3 The substitution count as a health metric
-
-Every run reports how many substitutions each sensor required. Expressed
-as a rate:
+### 8.3 Substitution rate as a health metric
 
 $$\rho_i = \frac{n_{\text{sub},i}}{n_{\text{frames}}}$$
 
-Measured across runs: $\rho \approx 0$ for healthy sensors, and
-$\rho = 0.25$ to $0.34$ for the faulty one. **A sensor above a few
-percent is a hardware fault**, and no gain compensates for a quarter of
-its readings being fabricated.
+Measured: $\rho \approx 0$ for healthy sensors, $\rho = 0.25$ to $0.34$
+for a faulty one. **A sensor above a few percent is a hardware fault**,
+and no gain compensates for a quarter of its readings being fabricated.
 
 ---
 
-## 🧭 5. Heading and Corner Counting
+## 🧭 9. Heading and Corner Counting
 
-### 5.1 Integration
+### 9.1 Integration
 
-The AbsoluteIMU reports angular rate. Heading is the discrete integral:
-
-$$\theta_k = \theta_{k-1} + \omega_k\,\Delta t_k, \qquad
-\omega_k = \big(\text{raw}_k - \bar{b}\big)\cdot s$$
+$$\theta_k = \theta_{k-1} + \omega_k\,\Delta t_k,
+\qquad \omega_k = (\text{raw}_k - \bar b)\,s$$
 
 $\Delta t_k$ is the **measured** elapsed time, not the nominal loop
-period, so a varying loop rate does not bias the result.
+period, so a varying loop rate introduces no bias.
 
-### 5.2 The scale factor
+### 9.2 The scale factor
 
 $$s = 0.1$$
 
-This is exact by construction, not fitted: the `ms-absolute-imu` driver
-in GYRO mode reports `units = d/s` with `decimals = 1`, so the raw
-integer is ten times the value in degrees per second.
+Exact by construction: the `ms-absolute-imu` driver in GYRO mode reports
+`units = d/s` with `decimals = 1`, so the raw integer is ten times the
+value in degrees per second.
 
 **Independent check.** Integrating one full manual rotation gave
-$s = 0.09795$, within 2 % of the exact value. The exact figure is kept;
-the measurement served to confirm the axis and the sign.
+$s = 0.09795$, within 2 %. The exact value is kept; the measurement
+confirmed the axis and the sign.
 
-### 5.3 Bias calibration
+### 9.3 Bias calibration
 
-The zero offset is the mean of $N = 600$ stationary samples:
+$$\bar b = \frac{1}{N}\sum_{k=1}^{N}\text{raw}_k, \qquad N = 600$$
 
-$$\bar{b} = \frac{1}{N}\sum_{k=1}^{N}\text{raw}_k$$
+Averaging reduces the bias uncertainty by $\sqrt N = 24.5$. This matters
+because bias error **integrates**: a residual $\varepsilon$ produces
+drift $\varepsilon t$, growing without bound over a three-lap run.
 
-Averaging reduces the uncertainty of the bias estimate by
-$\sqrt{N} = 24.5$. This matters because bias error integrates: a residual
-$\varepsilon$ produces drift $\varepsilon\,t$, growing without bound over
-a three-lap run.
+### 9.4 Dead band
 
-### 5.4 Dead band
-
-$$\omega_{\text{used}} = \begin{cases} 0 & |\omega| < 0.3\ °/\text{s} \\ \omega & \text{otherwise}\end{cases}$$
+$$\omega_{\text{used}} =
+\begin{cases} 0 & |\omega| < 0.3\ °/\text{s}\\ \omega & \text{otherwise}\end{cases}$$
 
 Any residual bias below $0.3\ °/\text{s}$ contributes exactly zero while
-the robot drives straight, bounding drift rather than merely reducing it.
+driving straight, **bounding** drift rather than merely reducing it.
 
-### 5.5 Corner detection
+### 9.5 Corner detection
 
-A corner is counted when
+$$|\theta| \ge 87° \quad\text{and}\quad t - t_{\text{last}} \ge 1.5\ \text{s}$$
 
-$$|\theta| \ge 87° \quad \text{and} \quad t - t_{\text{last}} \ge 1.5\ \text{s}$$
-
-after which $\theta$ is reset to zero.
-
-**The 87° threshold**, rather than 90°, absorbs the small undershoot from
-the dead band and from discrete integration.
+**87° rather than 90°** absorbs the small undershoot from the dead band
+and from discrete integration.
 
 **The 1.5 s interval** exists because the gyroscope cannot distinguish a
-track corner from an avoidance manoeuvre. When the camera sends the
+track corner from an avoidance manoeuvre: when the camera sends the
 steering to full lock, the robot genuinely rotates and genuinely
 accumulates 87°.
 
@@ -308,65 +489,17 @@ accumulates 87°.
 > **Measured failure.** During an obstacle run, two corners were counted
 > **1.1 s apart**, where real corners were arriving every **6 s**. Each
 > false corner brings the target of twelve closer; the robot would brake
-> mid-track believing it had completed three laps.
+> mid-track believing it had finished.
 
-The rejected turn still resets $\theta$, because that rotation physically
-happened and carrying it forward would trigger the following corner early.
-
----
-
-## ⚙️ 6. Steering Kinematics
-
-### 6.1 Travel measurement
-
-The steering is driven against both mechanical stops. Two distinct
-quantities result:
-
-| Quantity | Measured | Meaning |
-|:---|---:|:---|
-| $T_{\text{forced}}$ | $153°$ | Stop to stop at 100 % duty |
-| $T_{\text{free}}$ | $119°$ | Reached at minimum duty |
-
-The difference $T_{\text{forced}} - T_{\text{free}} = 34°$ is **not
-steering**. It is the mechanism flexing against the stops under load, and
-it does not translate into wheel angle.
-
-### 6.2 Deriving the limit
-
-$$L = \frac{T_{\text{free}}}{2} \times 0.85 = \frac{119}{2}\times 0.85 = 50.6°$$
-
-The factor 0.85 leaves a 15 % margin so the steering does not strike the
-stops on every correction.
-
-Taking the limit from $T_{\text{forced}}$ would give $65°$, and the
-steering would spend the race fighting its own end stops.
-
-### 6.3 Centre
-
-$$c = \frac{p_{+} + p_{-}}{2}$$
-
-the midpoint of the two forced extremes. The forced travel is used here
-because both ends are reached the same way; the free ends are reached one
-from the centre and one from a stop, and are therefore not symmetric.
-
-### 6.4 Per-side limits
-
-$$L_{\text{der}} = L\cdot f_{\text{der}}, \qquad L_{\text{izq}} = L\cdot f_{\text{izq}}$$
-
-with $f \in [0, 1]$. Expressing the clamp as a fraction keeps $L$ as the
-mechanical ceiling and the fractions as the tuning knob, so re-measuring
-the mechanism rescales both sides automatically.
+A rejected turn still resets $\theta$, because that rotation physically
+happened and carrying it forward would trigger the following corner
+early.
 
 ---
 
-## 🔋 7. Actuation and Supply Voltage
+## 🔋 10. Supply Voltage as a Hidden Parameter
 
-The EV3 motor output scales with battery voltage, which makes the battery
-a hidden control parameter.
-
-Drive speed is commanded as a fraction of the motor's maximum:
-
-$$\omega_{\text{cmd}} = \frac{v_{\%}}{100}\,\omega_{\max}, \qquad \omega_{\max} = 1560\ °/\text{s}$$
+The EV3 motor output scales with battery voltage.
 
 **Measured at $v_\% = 80$**, two identical tests minutes apart:
 
@@ -375,9 +508,9 @@ $$\omega_{\text{cmd}} = \frac{v_{\%}}{100}\,\omega_{\max}, \qquad \omega_{\max} 
 | ~7.4 V | 1248 °/s | 1219 °/s | **98 %** |
 | ~7.2 V | 1248 °/s | 1093 °/s | **88 %** |
 
-The motor is commanded in **velocity** mode, so the EV3 regulates on the
-encoder and compensates for load. It cannot compensate for a supply that
-can no longer deliver the required power.
+The drive motor is commanded in **velocity** mode, so the EV3 regulates
+on the encoder and compensates for load. It cannot compensate for a
+supply that can no longer deliver the power.
 
 > [!IMPORTANT]
 > Gains tuned on a half-charged battery do not reproduce on a full one.
@@ -385,30 +518,78 @@ can no longer deliver the required power.
 
 ---
 
-## 📊 8. Constant Reference
+## 📊 11. Reference Values
 
-Every value below lives in
-[`Src/ev3dev/wro/config.py`](../Src/ev3dev/wro/config.py).
+### Physical
+
+| Parameter | Value | Meaning |
+|:---|---:|:---|
+| Mass | **861 g** | Complete vehicle, as raced |
+| Weight | 8.45 N | $mg$ |
+| Overall dimensions | 24 × 23 × 18 cm | Within the 30 × 30 × 30 limit |
+| Wheel diameter $D$ | 56.0 mm | Drive wheel |
+| Wheel circumference $C$ | 175.93 mm | $\pi D$ |
+| Linear distance per degree | 0.4887 mm/° | $C/360$ |
+| Wheelbase $L_b$ | 24.0 cm | ⚠️ re-measure, see §6.1 |
+| Track width $W_t$ | 18.0 cm | ⚠️ re-measure, see §6.1 |
+| Motor resolution | 1° | EV3 encoder |
+| Running torque | 0.08 N·m | Reference operating torque |
+| Stall torque | 0.12 N·m | Blocked rotor, not a driving figure |
+| Tractive force | ≈ 2.86 N | $\tau / r$, ideal |
+| Max acceleration | ≈ 3.32 m/s² | $F/m$, ideal |
+| Required friction | $\mu \ge 0.34$ | Not to slip at full torque |
+| Motor max speed | 1560 °/s | EV3 Medium |
+
+### Control
 
 | Symbol | Constant | Value | Origin |
 |:---|:---|---:|:---|
-| $L$ | `VOLANTE_LIMITE` | 50.6° | Derived, §6.2 |
+| $L$ | `VOLANTE_LIMITE` | 50.6° | Derived, §6.3 |
 | $K_p$ | `VOLANTE_KP` | 3 | Tuned on track |
 | $K_{p,\text{obs}}$ | `VOLANTE_KP_OBSTACULOS` | 1.5 | Tuned on track |
-| $e_{\text{sat}}$ | `VOLANTE_ERROR_TOPE` | 16.9 | Derived, §2.2 |
-| $s$ | `IMU_ESCALA` | 0.1 | Exact, §5.2 |
-| $N$ | `IMU_MUESTRAS_CALIBRACION` | 600 | §5.3 |
-| $\omega_{\min}$ | `IMU_ZONA_MUERTA` | 0.3 °/s | §5.4 |
-| — | `ANGULO_ESQUINA` | 87° | §5.5 |
-| — | `ESQUINA_INTERVALO_MINIMO` | 1.5 s | Measured, §5.5 |
-| $T_{\text{hold}}$ | `ARD_RETENCION` | 0.5 s | §4.2 |
+| $e_{\text{sat}}$ | `VOLANTE_ERROR_TOPE` | 16.9 | Derived, §3.2 |
+| — | `VOLANTE_VELOCIDAD` | 600 °/s | Steering slew rate |
+| $s$ | `IMU_ESCALA` | 0.1 | Exact, §9.2 |
+| $N$ | `IMU_MUESTRAS_CALIBRACION` | 600 | §9.3 |
+| $\omega_{\min}$ | `IMU_ZONA_MUERTA` | 0.3 °/s | §9.4 |
+| — | `ANGULO_ESQUINA` | 87° | §9.5 |
+| — | `ESQUINA_INTERVALO_MINIMO` | 1.5 s | Measured, §9.5 |
+| $T_{\text{hold}}$ | `ARD_RETENCION` | 0.5 s | §8.2 |
 | $r_{\max}$ | `ARD_DISTANCIA_MAXIMA` | 100 cm | Corridor width |
-| — | `HUSKY_TARGET_ROJO` | −150 px | §3.2 |
-| — | `HUSKY_TARGET_VERDE` | +150 px | §3.2 |
+| — | `HUSKY_TARGET_ROJO` | −150 px | §7.2 |
+| — | `HUSKY_TARGET_VERDE` | +150 px | §7.2 |
 | — | `HUSKY_RETENCION` | 0.15 s | Measured |
 | — | `HUSKY_MARGEN_ANCHO` | 1.2 | Hysteresis |
 | $v_\%$ | `VELOCIDAD` | 70 | Open challenge |
 | $v_\%$ | `VELOCIDAD_OBSTACULOS` | 40 | Obstacle challenge |
+| $f$ | — | ≈ 30 Hz | Measured loop rate |
+
+---
+
+## 🔬 12. Open Items
+
+Values that need a measurement rather than a decision:
+
+| Item | Why it matters | Section |
+|:---|:---|:---:|
+| Angled sensor mount angle — 25° or 45°? | Changes $e/d$ by 15 %, which propagates into every gain | §2.2 |
+| Wheelbase and track width | Current figures match the bounding box, not the chassis | §6.1 |
+| Gear ratio, motor to wheel | Every linear speed in §4.2 assumes direct drive | §4.2 |
+| Mass on the driven axle | Sets the real slip threshold, not the total weight | §5.3 |
+
+---
+
+## 🚀 13. Future Work
+
+- Per-sensor offset calibration for the ultrasonic array.
+- Speed modulation by track section: slower through corners, faster on
+  the straights.
+- Logging runs to file for post-race analysis instead of console
+  telemetry.
+- Measuring drivetrain efficiency experimentally, to replace the ideal
+  torque figures in §5 with real ones.
+- Recovering camera detection range at pillar distance, which bounds how
+  early an avoidance can begin.
 
 ---
 

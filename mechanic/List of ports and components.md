@@ -1,5 +1,18 @@
 # Ports and Components
 
+## Vehicle
+
+| Parameter | Value |
+|:---|---:|
+| Mass | **861 g** |
+| Dimensions | 24 × 23 × 18 cm |
+| Wheel diameter | 56.0 mm |
+| Wheel circumference | 175.93 mm |
+| Linear travel per motor degree | 0.4887 mm |
+
+See [`docs/Control_Model.md`](../docs/Control_Model.md) for what these
+numbers imply about traction, acceleration and steering geometry.
+
 > [!NOTE]
 > Every port assignment below was read off the robot with
 > `python3 check_hw.py puertos`, which prints what ev3dev actually
