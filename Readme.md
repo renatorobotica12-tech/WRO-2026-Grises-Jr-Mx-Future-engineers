@@ -356,6 +356,7 @@ The current robot incorporates multiple engineering improvements developed speci
 | Competition | WRO Future Engineers 2026 |
 | Robot Type | Autonomous Vehicle |
 | Dimensions | 24 × 23 × 18 cm |
+| **Mass** | **861 g** |
 | Maximum Allowed Size | 30 × 30 × 30 cm |
 | Steering System | Ackermann Steering |
 | Drive System | Rear-Wheel Drive |
@@ -492,6 +493,7 @@ The result is a compact autonomous vehicle designed for reliability and repeatab
 | Length | 24 cm |
 | Width | 23 cm |
 | Height | 18 cm |
+| **Mass** | **861 g** |
 
 
 The final design remains within the official WRO Future Engineers national competition limit of:
@@ -499,6 +501,21 @@ The final design remains within the official WRO Future Engineers national compe
 ```
 30 × 30 × 30 cm
 ```
+
+### Why the mass is worth recording
+
+861 g is not just a specification line. Combined with the drive motor's
+running torque it sets the vehicle's dynamic limits:
+
+| Derived quantity | Value |
+|:---|---:|
+| Weight | 8.45 N |
+| Tractive force available | ≈ 2.86 N |
+| Maximum acceleration | ≈ 3.32 m/s² |
+| Friction coefficient required not to slip | μ ≥ 0.34 |
+
+The full derivation is in
+[**docs/Control_Model.md § 5**](docs/Control_Model.md).
 
 
 The available internal space allows integration of:
