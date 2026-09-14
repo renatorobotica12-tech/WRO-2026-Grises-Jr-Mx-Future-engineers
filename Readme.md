@@ -59,14 +59,14 @@ The final platform combines:
 |:---|:---|
 | Steering | Ackermann steering geometry |
 | Drive System | Rear-wheel drive |
-| Main Controller | LEGO Mindstorms EV3 Brick |
-| Coprocessors | 2 Arduino Nano, 1 for the camera and one for the PCB |
-| Vision System | HuskyLens AI Camera |
+| Main Controller | LEGO Mindstorms EV3 Brick, running ev3dev (Debian Linux) |
+| Coprocessor | 1 Arduino Nano, multiplexing the five ultrasonic sensors |
+| Vision System | HuskyLens AI Camera, through a LEGO UART adapter |
 | Distance Measurement | Five ultrasonic sensors |
-| Communication | I²C protocol and UART protocol |
+| Communication | USB serial at 115200 baud, plus LEGO UART for the camera |
 | Electronics | Custom-designed PCB |
-| Control Algorithm | Adaptive Dual PD Controller |
-| Decision System | Finite State Machine |
+| Control Algorithm | Proportional wall-centring, with measured filtering and hold-over |
+| Control Software | Python, modular package (`Src/ev3dev`) |
 
 
 ---
@@ -76,35 +76,36 @@ The final platform combines:
 <div align="center">
 
 ```
-                 ┌──────────────────┐               ┌────────────────┐
-                 │ HuskyLens Camera │               │   Ultrasonic   │
-                 └────────┬─────────┘               │  Sensors (x5)  │
-                          │                         └───────┬────────┘
-                 │ UART                            │
-                 ▼                                 ▼
-                 ┌──────────────────┐               ┌────────────────┐
-                 │   Arduino Nano   │               │   Custom PCB   │
-                 │      (UART)      │               └───────┬────────┘
-        └────────┬─────────┘                       │
-                 │                                 ▼
-                          │                         ┌────────────────┐
-                          │                         │  Arduino Nano  │
-                          │                         │     (I²C)      │
-                          │                         └───────┬────────┘
-                 |                                 │
-                 └────────────────┬────────────────┘
-                 │
-                 ▼
-                ┌────────────────┐
-                │    LEGO EV3    │
-                │   Controller   │
-                └────────┬───────┘
-                 │
-                 ┌───────────────┴───────────────┐
-                 ▼                               ▼
-         ┌──────────────┐                ┌──────────────┐
-         │Steering Motor│                │  Drive Motor │
-         └──────────────┘                └──────────────┘
+   ┌──────────────────┐          ┌──────────────────┐
+   │ HuskyLens Camera │          │ Ultrasonic x5    │
+   └────────┬─────────┘          └────────┬─────────┘
+            │                             │
+            │                             ▼
+            │                    ┌──────────────────┐
+            │                    │    Custom PCB    │
+            │                    └────────┬─────────┘
+            │                             │
+            ▼                             ▼
+   ┌──────────────────┐          ┌──────────────────┐
+   │   OFDL adapter   │          │   Arduino Nano   │
+   └────────┬─────────┘          └────────┬─────────┘
+            │                             │
+       LEGO UART                     USB serial
+      (sensor port 3)                 115200 baud
+            │                             │
+            └──────────────┬──────────────┘
+                           ▼
+                  ┌──────────────────┐     ┌──────────────┐
+                  │     LEGO EV3     │◄────│ AbsoluteIMU  │
+                  │  running ev3dev  │ I²C │  (gyroscope) │
+                  └────────┬─────────┘     └──────────────┘
+                           │
+            ┌──────────────┴──────────────┐
+            ▼                             ▼
+   ┌──────────────────┐          ┌──────────────────┐
+   │  Steering Motor  │          │   Drive Motor    │
+   │     (port A)     │          │     (port B)     │
+   └──────────────────┘          └──────────────────┘
 ```
 
 </div>
@@ -112,10 +113,15 @@ The final platform combines:
 
 The robot uses a distributed architecture where each subsystem performs a specific role:
 
-- The **Arduino Nano** manages sensor acquisition and communication.
-- The **EV3 Brick** performs navigation decisions and motion control.
-- The **Custom PCB** organizes power distribution and signal routing.
-- The **software architecture** coordinates calibration, sensing, and autonomous driving.
+- The **Arduino Nano** measures the five ultrasonic sensors and streams them over USB.
+- The **OFDL adapter** translates the HuskyLens output into the LEGO UART protocol, so the EV3 sees the camera as an ordinary sensor.
+- The **EV3 Brick**, running ev3dev, performs navigation decisions and motion control in Python.
+- The **Custom PCB** organizes power distribution and signal routing for the sensor array.
+
+**Why USB instead of I²C.** The sensors originally reached the brick over
+I²C on a sensor port. The EV3 does not have I²C hardware: it bit-bangs
+the protocol in software and it runs at a few kHz. Moving the Nano to USB
+at 115200 baud removed that bottleneck and freed a sensor port.
 
 
 ---
@@ -133,10 +139,11 @@ The robot uses a distributed architecture where each subsystem performs a specif
 - [⚡ Electronics](#-electronics)
 - [🔌 Custom PCB](#-custom-pcb)
 - [💻 Software Architecture](#-software-architecture)
-- [🎯 Steering Calibration](#-automatic-steering-calibration)
-- [📡 Sensor Calibration](#-sensor-calibration)
-- [🎮 Closed-Loop PID Controller](#-closed-loop-pid-controller)
-- [🔄 Finite State Machine](#-finite-state-machine)
+- [📡 Ultrasonic Sensor Fusion](#-ultrasonic-sensor-fusion)
+- [🎮 Wall-Centring Controller](#-wall-centring-controller)
+- [👁 Camera Avoidance](#-camera-avoidance)
+- [🎯 Automatic Steering Calibration](#-automatic-steering-calibration)
+- [🧮 Corner Counting](#-corner-counting)
 - [🧠 Engineering Decisions](#-engineering-decisions)
 - [📈 Current Performance](#-current-performance)
 - [📓 Engineering Journal](#-engineering-journal)
@@ -293,14 +300,15 @@ The current robot incorporates multiple engineering improvements developed speci
 |:---|:---|
 | Steering System | Ackermann steering geometry |
 | Drive System | Rear-wheel drive |
-| Sensors | Five ultrasonic sensors |
-| Vision | HuskyLens AI camera |
-| Coprocessors | 2 Arduino Nano, 1 for camera and 1 for pcb |
+| Sensors | Five ultrasonic sensors, with dropout filtering |
+| Vision | HuskyLens AI camera, with hold-over and nearest-block selection |
+| Coprocessor | 1 Arduino Nano streaming over USB |
 | Electronics | Custom PCB |
-| Communication | I²C architecture |
-| Steering Calibration | Automatic encoder-based calibration |
-| Control | PID Tuned  |
-| Software | Modular architecture |
+| Communication | USB serial at 115200 baud |
+| Steering Calibration | Automatic, measured against the mechanical stops |
+| Control | Proportional, with every gain measured and recorded |
+| Drive Control | Closed loop on the encoder, not raw power |
+| Software | Modular Python package |
 | Sensor Mounting | Custom 3D printed supports |
 | Mechanical Design | Optimized weight distribution |
 
@@ -323,14 +331,16 @@ The current robot incorporates multiple engineering improvements developed speci
 | Steering System | Ackermann Steering |
 | Drive System | Rear-Wheel Drive |
 | Chassis | LEGO Mindstorms EV3 |
-| Main Controller | LEGO EV3 Brick |
+| Main Controller | LEGO EV3 Brick running ev3dev |
 | Coprocessor | Arduino Nano |
 | Vision System | HuskyLens AI Camera |
 | Distance Sensors | Five Ultrasonic Sensors |
-| Communication Protocol | I²C |
+| Gyroscope | mindsensors AbsoluteIMU |
+| Communication Protocol | USB serial, 115200 baud |
 | Custom Electronics | Custom PCB |
 | Sensor Supports | 3D Printed |
-| Programming Languages | EV3-G & Arduino C++ |
+| Programming Languages | Python (EV3) and Arduino C++ (Nano) |
+| Control Loop Rate | ~30 Hz measured on track |
 
 </div>
 
@@ -390,15 +400,21 @@ Each component was selected according to:
 
 | Component | Quantity | Function | Status |
 |:---|:---:|:---|:---:|
-| LEGO EV3 Brick | 1 | Main controller | ✅ |
-| EV3 Medium Motor | 1 | Rear-wheel traction | ✅ |
-| EV3 Medium Motor | 1 | Ackermann steering | ✅ |
+| LEGO EV3 Brick | 1 | Main controller, runs ev3dev | ✅ |
+| EV3 Medium Motor | 1 | Rear-wheel traction — **port B** | ✅ |
+| EV3 Medium Motor | 1 | Ackermann steering — **port A** | ✅ |
 | Ultrasonic Sensors | 5 | Distance measurement | ✅ |
-| Arduino Nano | 1 | Sensor acquisition and communication | ✅ |
-| HuskyLens AI Camera | 1 | Vision processing | ✅ |
+| Arduino Nano | 1 | Sensor acquisition, USB serial | ✅ |
+| HuskyLens AI Camera | 1 | Vision processing — **port 3** | ✅ |
+| mindsensors AbsoluteIMU | 1 | Heading and corner counting — **port 2** | ✅ |
+| OFDL UART Adapter | 1 | Presents the camera as a LEGO sensor | ✅ |
 | Custom PCB | 1 | Power and signal distribution | ✅ |
 | LEGO Wheels | 4 | Vehicle mobility | ✅ |
 | 3D Printed Supports | Multiple | Sensor mounting | ✅ |
+
+> [!NOTE]
+> The complete port assignment, verified on the robot, is in
+> [`mechanic/List of ports and components.md`](mechanic/List%20of%20ports%20and%20components.md).
 
 
 ---
@@ -538,7 +554,7 @@ The software limits the maximum steering angle to prevent:
 # 🚗 Rear-Wheel Drive
 
 
-The vehicle uses a rear-wheel-drive configuration powered by an EV3 Large Motor.
+The vehicle uses a rear-wheel-drive configuration powered by an EV3 Medium Motor.
 
 
 This architecture was selected because it provides several advantages:
@@ -597,7 +613,8 @@ The system is divided into two main processing units:
 | Controller | Responsibility |
 |:---|:---|
 | LEGO EV3 Brick | Navigation, decision making, motor control |
-| Arduino Nano | Sensor acquisition and communication |
+| Arduino Nano | Ultrasonic acquisition and serial streaming |
+| OFDL adapter | Camera protocol translation (not programmed by the team) |
 
 
 This distributed architecture provides:
@@ -631,7 +648,8 @@ This distributed architecture provides:
           │ Nano       │
           └─────┬──────┘
                 │
-              I²C
+           USB serial
+          115200 baud
 
                 │
 
@@ -724,17 +742,32 @@ Software Architecture • Calibration Systems • Ultrasonic Sensor Fusion • P
 </div>
 # 💻 Software Architecture
 
-The Los Grises Jr software was designed following a modular and iterative engineering approach, where each subsystem has a specific responsibility.
+The control software runs in Python on the EV3 brick under ev3dev. It is
+organised as a package, `Src/ev3dev/wro`, where each module owns one part
+of the robot and nothing else:
 
-Rather than concentrating all functionality into a single control routine, the system separates the main tasks into independent logical components:
+| Module | Responsibility |
+|:---|:---|
+| `config.py` | Every tunable value, and how each one was measured |
+| `ultrasonics.py` | Reading the Nano, and filtering sensor dropouts |
+| `husky.py` | The camera, and choosing which block to avoid |
+| `imu.py` | Heading integration and corner counting |
+| `robot.py` | Drive train and steering |
+| `power.py` | Powering the Nano from a motor port |
+| `ports.py`, `i2c.py`, `util.py` | Low-level helpers |
 
-Sensor acquisition — Ultrasonic sensors for distance and positioning.
-Sensor fusion — Combination of multiple ultrasonic readings to generate a reliable lateral error.
-Obstacle detection — Front ultrasonic sensor used as a safety condition.
-Motion control — Closed-loop PID controller for steering correction.
-Speed control — Dynamic calculation of the VEL variable according to the driving conditions.
-Emergency response — Immediate stop and reverse maneuver when an obstacle is detected within the critical distance.
-Hardware initialization — Motor D initialization, which acts as the PCB adapter.
+Two programs use that package, one per challenge:
+
+| Program | Challenge |
+|:---|:---|
+| `open_ard.py` | Open challenge — three laps, walls only |
+| `obs_ard.py` | Obstacle challenge — three laps, avoiding coloured pillars |
+
+A third, `check_hw.py`, never races. It is a diagnostics tool with
+thirteen commands, and it exists because several values cannot be decided
+at a desk: which frame index belongs to which sensor, the gyroscope scale
+and sign, and how far the steering actually travels. Guessing those wrong
+produces failures that look like software bugs.
 
 This organization improves:
 
@@ -745,32 +778,45 @@ This organization improves:
 ✅ System reliability
 ✅ Ease of maintenance
 
-🧩 Software Execution Flow
-    A[START: Initialize Motor D / PCB Adapter]
-        --> B[Read Front Ultrasonic Sensor]
+## 🧩 Software Execution Flow
 
-    B --> C{front_dist < 25 cm?}
+Every start-up runs the same three-stage sequence before the robot is
+allowed to move:
 
-    C -->|YES: Obstacle Detected|
-        D[Stop Motors]
-        --> E[Wait a Few Milliseconds]
-        --> F[Reverse 0.5 Rotations]
-        --> B
+```
+START
+  ↓
+Power the Nano from port D, then open the serial link
+  ↓
+Find both steering stops, take the midpoint as centre
+  ↓
+Calibrate the gyroscope zero  (robot must be still)
+  ↓
+Print the values actually in use
+  ↓
+Wait for the centre button
+  ↓
+┌─────────────── CONTROL LOOP, ~30 Hz ───────────────┐
+│                                                     │
+│  Read camera, ultrasonics and gyroscope             │
+│           ↓                                         │
+│  Corner?  accumulated turn ≥ 87° and not too soon   │
+│           after the last one  →  count it           │
+│           ↓                                         │
+│  Drive at the configured speed                      │
+│           ↓                                         │
+│  Steering:  camera sees a block  →  avoid it        │
+│             otherwise            →  centre between  │
+│                                     the walls       │
+│           ↓                                         │
+│  12 corners reached?  →  run on briefly, then stop  │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
 
-    C -->|NO: Normal Driving|
-        G[Read Four Ultrasonic Sensors]
-
-    G --> H[Calculate Left/Right Sensor Sums]
-
-    H --> I["ERROR = (Sensor_1 + Sensor_2) - (Sensor_3 + Sensor_4)"]
-
-    I --> J[Calculate / Update VEL]
-
-    J --> K["Apply PID Controller"]
-
-    K --> L[Apply Motor Command]
-
-    L --> B 
+The order inside the loop is deliberate. The drive motor is given the
+speed computed on the *previous* iteration, so a corner detected on this
+iteration stops the robot without one last burst of throttle.
 ---
     
 # 📡 Ultrasonic Sensor Fusion
@@ -781,193 +827,213 @@ Instead of relying on a single sensor, the readings are combined into two groups
 
 The lateral error is calculated as the difference between both groups:
 
-Side_A = Ultrasonic_1 + Ultrasonic_2
+```
+left  = left_90  + left_25
+right = right_25 + right_90
 
-Side_B = Ultrasonic_3 + Ultrasonic_4
+ERROR = -(left - right)
+```
 
-ERROR = Side_A - Side_B
+**The negation matters.** If the robot drifts towards the left wall, the
+left readings fall, the error comes out **positive**, and a positive
+steering command turns **right** — away from the wall. That sign is what
+makes the whole chain close.
 
-This approach provides a more stable representation of the robot's lateral position and reduces the influence of individual sensor variations.
+Because each side sums two sensors, a sideways drift moves all four at
+once: two get closer while two get further away. The error therefore
+grows about four times faster than the actual displacement, which is why
+the gain looks small compared with the numbers involved.
 
-The resulting ERROR becomes the primary feedback signal for the PID controller.
+## Handling dropped readings
 
-# 🎯 Front Ultrasonic Safety System
+When an ultrasonic sensor receives no echo, the firmware sends **125**
+and clears that sensor's validity bit. **125 is a sentinel, not a
+distance.** Added straight into the error, one dropout looks like an 80 cm
+jump and slams the steering to full lock.
 
-A dedicated front ultrasonic sensor is used to detect obstacles ahead of the robot.
+Measured with `check_hw.py lazo`: the error went from **+5 to −82 and
+back to +31 in under a second, with the robot standing still.**
 
-The system continuously evaluates the measured distance:
+The fix is a three-state filter, applied per sensor:
 
-IF front_distance < 25 cm
+| Situation | What is used |
+|:---|:---|
+| Valid reading | The reading itself, and it is remembered |
+| Short dropout | The last good reading, held for 0.5 s |
+| Long dropout | The maximum useful distance — there really is no wall |
 
-When the distance falls below the critical threshold, normal PID control is temporarily overridden.
+A rolling median of three then removes isolated spikes that arrive with
+their validity bit set.
 
-The robot:
+Each run prints how many substitutions each sensor needed. That number is
+a hardware health check: **a sensor substituting a quarter of the time is
+a fault no amount of gain tuning compensates for.** Finding exactly that
+is how we caught a dead sensor during testing.
 
-Stops the motors.
-Waits for a short stabilization period.
-Reverses 0.5 motor rotations.
-Returns to the main control loop.
+# 🎮 Wall-Centring Controller
 
-This creates a safety override that prevents the robot from continuing forward when an obstacle is detected at close range.
+Steering correction is **proportional**:
 
-# 🎮 Closed-Loop PID Controller
+```
+angle = VOLANTE_KP × ERROR      clamped to ±VOLANTE_LIMITE
+```
 
-The main motion-control system is based on a closed-loop PID controller.
+One gain, no derivative and no integral term. That is a deliberate
+choice, not an omission — and the reasoning is recorded in
+[`Logs_Tuning.md`](docs/Logs_Tuning.md), where the integral term was
+found to saturate the steering actuator on track imperfections.
 
-The controller receives the calculated ultrasonic error and generates the steering correction required to maintain the desired position.
+What makes this controller reliable is not the form of the equation but
+knowing what the gain *means*:
 
-ERROR
-  ↓
-PID Controller
-  ↓
-Steering Correction
-  ↓
-Motor Command
+| Gain | Saturates at error | Roughly |
+|:---:|:---:|:---|
+| 10 | 5 | 1 cm off centre — effectively on/off |
+| 3 | 16.9 | 4 cm off centre |
+| 1.5 | 33.7 | 8 cm off centre |
 
-The PID parameters were experimentally tuned using real track testing.
+`config.py` derives that saturation point automatically, so the meaning
+of the gain is visible next to the gain itself rather than having to be
+recomputed by hand.
 
-Rather than relying exclusively on theoretical calculations, the team developed and evaluated multiple iterations of the controller. Each iteration was tested, analyzed, modified, and retested until a stable and efficient configuration was achieved.
+**One tuning lesson worth recording:** we once raised the gain as high as
+10 chasing a robot that would not respond. The real cause was a dead
+ultrasonic sensor pinning the error at a constant +62. With the sensor
+repaired the true operating error turned out to be 5 to 9, and a gain of
+10 saturated the steering permanently. **The gain was compensating for a
+broken sensor.**
 
-The final Kp, Ki, and Kd values therefore represent real-world tuning obtained through track validation.
+# ⚡ Speed Control
 
-Control concept
-error = sensor_difference
+The two challenges use independent speeds, because they are solving
+different problems:
 
-derivative = error - previous_error
+| Challenge | Speed | Why |
+|:---|:---:|:---|
+| Open | 70 | Only has to stay centred; can afford to be quick |
+| Obstacle | 40 | The camera must see a block, choose a side and complete the detour before reaching it |
 
-integral = integral + error
+Speed is commanded as a **percentage of the motor's maximum speed**, with
+the EV3 regulating on the encoder. If a wheel is slowed by a track
+imperfection, the controller raises power on its own until the commanded
+speed is recovered. Commanding raw duty cycle instead is open loop: the
+robot simply bogs down. We changed to closed loop after exactly that kept
+happening on track.
 
-output =
-    (KP × error)
-    + (KI × integral)
-    + (KD × derivative)
+# 👁 Camera Avoidance
 
-The resulting PID output is used to adjust the motor commands while VEL determines the forward-speed component.
+In the obstacle challenge the camera takes over the steering whenever it
+sees a coloured pillar. The rule is a proportional controller on the
+block's **position in the image**:
 
-#⚡ Dynamic Speed Control
+```
+error = X - target
+angle = map(error, -160..+160, -limit..+limit)
+```
 
-The variable VEL is used to determine the robot's forward speed during normal operation.
+`target` is where the block should end up in the frame, and it is the
+knob that sets how wide the detour is:
 
-Instead of treating speed as a completely independent constant, the program contains a dedicated section responsible for calculating and updating this variable.
+| Colour | ID | Target | Result |
+|:---|:---:|:---:|:---|
+| Red | 1 | −150 | Block ends up left in frame → robot passes on the **right** |
+| Green | 2 | +150 | Block ends up right in frame → robot passes on the **left** |
 
-This allows the control system to balance speed and stability, maintaining sufficient forward momentum while preserving the responsiveness of the PID controller.
+This reads backwards the first time. It is because the camera looks where
+the robot is *going*, not at the block: to leave a pillar on your left,
+you must be pointing to the right of it.
 
-The speed-control logic was also evaluated through repeated track testing to determine an effective operating range.
+The target must stay inside ±160, the edge of the image. **A target
+outside that range is a position the block can never reach**, so the
+error never crosses zero and the steering never straightens out while the
+block is in view.
 
-# 🔄 Main Control Logic
+## Three problems the camera created
 
-The complete control strategy can be summarized as follows:
+**The adapter's documented data layout is wrong.** Its README lists six
+values as `State, ID, X, Y, W, H`. The adapter actually returns **eight**
+values in a different order: `X, Y, W, H, ID, State`. We found this by
+watching index 5 alternate between 1 and 7 — exactly the codes for
+"object detected" and "sees none" — with every other value dropping to
+zero when it read 7.
 
-                ┌─────────────────────┐
-                │        START        │
-                └──────────┬──────────┘
-                           ↓
-                Initialize Motor D
-                           ↓
-                  Read Front Sensor
-                           ↓
-                  ┌────────────────┐
-                  │ Distance < 25cm?│
-                  └───────┬────────┘
-                     YES  │  NO
-                      ↓   │
-              Stop Motors │
-                      ↓   ↓
-                Short Wait │
-                      ↓    │
-             Reverse 0.5   │
-               Rotations   │
-                      │    ↓
-                      │  Read 4
-                      │ Ultrasonics
-                      │    ↓
-                      │ Calculate
-                      │ Sensor Error
-                      │    ↓
-                      │ Calculate VEL
-                      │    ↓
-                      │ Apply PID
-                      │    ↓
-                      │ Motor Command
-                      │    │
-                      └────┴───────────┐
-                                       ↓
-                                Repeat Main Loop
-# 🧠 Engineering Decisions
+**Reading it naively cost 49 ms.** Eight separate reads took long enough
+to hold the whole control loop at 20 Hz. Reading the raw 32-byte block in
+one atomic call takes 5 ms, and has the side benefit that data from two
+frames can never be mixed.
 
-Several design decisions were made based on practical testing rather than theoretical assumptions.
+**The camera flickers, and the adapter switches blocks.** A one-frame
+dropout used to hand control back to wall following, which at that
+instant saw a large error and went to full lock: measured at **+1.9° to
++50.6° and back inside 300 ms, with the block in view the whole time.**
+And with two pillars visible, the adapter alternates which one it
+reports, producing commands for opposite sides on consecutive loops.
 
-Multiple ultrasonic sensors
+Both are solved, but not the same way:
 
-Using multiple sensors allows the robot to calculate its lateral error from combined measurements instead of depending on a single sensor.
+| Problem | Solution | Why this one |
+|:---|:---|:---|
+| Flicker | Hold the last good command for 0.15 s | Covers the 1–3 loop dropouts measured |
+| Block switching | Only yield control to a **wider** block | Wider means closer; the closest pillar is the urgent one |
 
-PID instead of open-loop control
+We first tried stretching the hold window to fix both. It did not work —
+the retention rate tripled to 31 % while the switching continued
+unchanged, because the adapter stays on the other block for longer than
+any reasonable window. **The longer window only made the robot act on
+stale images.** Width is the right criterion, and it is the only
+proximity information the adapter provides.
 
-The robot continuously reacts to sensor feedback, allowing it to correct deviations dynamically rather than relying on predetermined motor commands.
+# 🎯 Automatic Steering Calibration
 
-Front ultrasonic safety override
+At every start-up the robot pushes the steering against both mechanical
+stops and takes the midpoint as zero. That is reliable even if the robot
+was stored with the wheels turned.
 
-Obstacle detection has priority over normal motion control. When the critical distance is reached, the PID-driven movement is interrupted and the robot performs a predefined safety maneuver.
+Two things were learned building this:
 
-# Track-based PID tuning
+**The stop is not where the motor stops moving.** At 40 % duty the
+steering advances 28 degrees and jams halfway; it takes 100 % to actually
+reach the stop. An earlier version accepted the first stall as the stop,
+measured 26 degrees of travel instead of 111, and put the centre almost
+50 degrees off. The search now walks the full power ladder every time.
 
-The PID parameters were not selected exclusively through simulation. They were refined through repeated real-track testing, making the final controller better adapted to the actual mechanical and environmental conditions of the robot.
+**Forced travel and free travel are different numbers, and the
+difference is not steering.** Measured on this robot: 153 degrees pushing
+at full power, 119 at minimum power. Those 34 degrees are the mechanism
+flexing against the stops. The steering limit is derived from the **free**
+travel with a 15 % margin; taking it from the forced travel would make
+the steering fight the stops on every correction.
 
-# Dynamic velocity
+# 🧮 Corner Counting
 
-Separating VEL from the PID correction allows the system to control forward motion while independently applying steering corrections.
+Laps are counted by integrating the gyroscope: 87 degrees of accumulated
+turn is a corner, twelve corners is three laps.
 
-🚀 Future Improvements
+That works in the open challenge. In the obstacle challenge it broke,
+and the reason is worth recording: **while avoiding a block the steering
+goes to full lock and the robot genuinely turns.** The gyroscope cannot
+tell that from a track corner, accumulates its 87 degrees, and counts a
+corner that does not exist.
 
-Potential improvements to the current software architecture include:
+Measured on track: **two corners 1.1 seconds apart, where the real ones
+were arriving every 6.** In a race that is fatal — each false corner
+brings the target of twelve closer, and the robot brakes mid-track
+believing it has finished.
 
-Automatic ultrasonic sensor calibration and offset compensation.
-Filtering of ultrasonic readings to reduce measurement noise.
-Adaptive PID parameters depending on track conditions.
-Automatic optimization of VEL.
-Improved obstacle recovery behavior.
-Data logging for post-run PID analysis.
-Automatic parameter tuning based on recorded track data.
+Corners arriving closer together than 1.5 seconds are now discarded. The
+angle is still reset, because that turn physically happened and carrying
+it forward would trigger the next corner early. Each run reports how many
+false corners were rejected.
 
----
-       ┌───────────────────────┐
-       │   Ultrasonic Sensors  │
-       └───────────┬───────────┘
-                   │
-                   ↓
-       ┌───────────────────────┐
-       │   Sensor Fusion       │
-       │   ERROR Calculation   │
-       └───────────┬───────────┘
-                   │
-                   ↓
-       ┌───────────────────────┐
-       │    PID Controller     │
-       └───────────┬───────────┘
-                   │
-                   ↓
-       ┌───────────────────────┐
-       │     Motor Control     │
-       └───────────────────────┘
-                   ↑
-                   │
-       ┌───────────────────────┐
-       │    Speed Control      │
-       │        VEL            │
-       └───────────────────────┘
+# 🚀 Future Improvements
 
-       ┌───────────────────────┐
-       │ Front Ultrasonic      │
-       │ Obstacle Detection    │
-       └───────────┬───────────┘
-                   │
-             < 25 cm?
-                   │
-                   ↓
-       ┌───────────────────────┐
-       │   Safety Override     │
-       │ Stop + Reverse 0.5R   │
-       └───────────────────────┘
+- Per-sensor offset calibration for the ultrasonic array.
+- Speed modulation by track section: slower through corners, faster on
+  the straights.
+- Logging runs to file for post-race analysis instead of console
+  telemetry.
+- Recovering the camera's detection range at pillar distance, which
+  limits how early an avoidance can begin.
 
 ---
 
@@ -984,11 +1050,17 @@ Every major engineering decision was based on testing, analysis, and continuous 
 | Encoder Steering | Absolute position control | Repeatable angles |
 | Five Ultrasonic Sensors | Increased environmental awareness | Better perception |
 | Arduino Nano Coprocessor | Dedicated sensor processing | Reduced EV3 workload |
-| I²C Communication | Single communication channel | Cleaner architecture |
+| USB instead of I²C | The EV3's sensor-port I²C is bit-banged in software at a few kHz | Removed the bottleneck, freed a port |
 | Custom PCB | Organized electronics | Improved maintenance |
 | 3D Printed Mounts | Fixed sensor position | Better measurements |
+| Python on ev3dev | Control maths written literally instead of approximated with blocks | Every gain carries its reasoning |
 | Modular Software | Independent modules | Easier development |
-| Corridor PID Controller | Adaptive driving behavior | Better stability |
+| Proportional control | The integral term saturated the actuator on track imperfections | Predictable, tunable behaviour |
+| Closed-loop drive | Raw duty cycle stalls against track imperfections | Speed is held, not just requested |
+| Sensor dropout filter | A missing echo is a sentinel, not a distance | One dropout no longer causes full lock |
+| Camera hold-over | One lost frame is not a lost block | No steering jerk mid-avoidance |
+| Nearest-block selection | The adapter switches between visible pillars | No contradictory commands |
+| False corner rejection | An avoidance turn looks identical to a corner | Lap count survives the obstacle run |
 
 
 ---
@@ -1006,9 +1078,15 @@ Achievements:
 ✅ Smooth steering corrections  
 ✅ Automatic steering calibration  
 ✅ Consistent multi-run performance  
-✅ Stable Arduino-EV3 communication  
+✅ Arduino-EV3 link with **zero bad frames** across full runs  
+✅ Control loop sustained at **~30 Hz** on track  
 ✅ Improved electrical reliability after PCB integration  
 ✅ Strong mechanical structure for repeated testing  
+
+Every run reports its own diagnostics: loop rate, corners counted, false
+corners rejected, bad frames from the Nano, and per-sensor substitution
+counts. Those numbers are how hardware faults get caught before they are
+mistaken for tuning problems.
 
 
 The current platform provides a reliable foundation for completing future competition objectives.
@@ -1033,11 +1111,9 @@ The journal includes:
 - Performance analysis.
 
 
-📄 Engineering Journal:
+📄 [**docs/Engineering Journal.md**](docs/Engineering%20Journal.md)
 
-```
-docs/engineering_journal.md
-```
+📄 [**docs/Logs_Tuning.md**](docs/Logs_Tuning.md) — the controller tuning log, iteration by iteration
 
 
 ---
@@ -1047,30 +1123,48 @@ docs/engineering_journal.md
 
 ```text
 .
+├── Src
+│   ├── ev3dev                    Control software, Python on the EV3
+│   │   ├── check_hw.py           Diagnostics, 13 commands
+│   │   ├── open_ard.py           Open challenge
+│   │   ├── obs_ard.py            Obstacle challenge
+│   │   └── wro/                  The library the programs import
+│   │       ├── config.py         Every tunable value, and how it was measured
+│   │       ├── robot.py          Drive train and steering
+│   │       ├── imu.py            Gyroscope and corner counting
+│   │       ├── ultrasonics.py    The Nano, and dropout filtering
+│   │       ├── husky.py          Camera and block selection
+│   │       ├── power.py          Powering the Nano from a motor port
+│   │       ├── ports.py          Sensor port modes
+│   │       ├── i2c.py            Raw I2C access
+│   │       └── util.py           Numeric helpers
+│   │
+│   └── arduino_nano              Firmware for the ultrasonic hub
+│       ├── ultrasonic_hub_serial.ino    in use — USB, 115200 baud
+│       ├── ultrasonic_hub_packet.ino    I2C fallback, framed
+│       └── ultrasonic_hub.ino           original, one byte per request
+│
 ├── docs
-│   ├── engineering_journal.md
-│   ├── mechanical_design.md
-│   ├── electronics.md
-│   └── software.md
+│   ├── Engineering Journal.md
+│   ├── Logs_Tuning.md            Controller tuning, iteration by iteration
+│   ├── OPEN_ARD_EQUIVALENCIA.md
+│   ├── PROTOCOLO_I2C_MULTIPLEXOR.md     The Nano's I2C frame format
+│   └── BLOQUE_GIRO_ABSOLUTEIMU_EV3.md   Gyroscope integration
 │
-├── images
-│   ├── robot
-│   ├── pcb
-│   ├── team
-│   └── development
+├── Electronics                   PCB design notes
+├── mechanic                      Diagrams, port list, 3D printable parts
+├── Photos                        Team and vehicle photographs
+├── Videos                        Demonstration footage
 │
-├── mechanic
-│   ├── sensor_mount.stl
-│   └── 
-│
-├── src
-│   ├── EV3-G
-│   ├── Arduino
-│   └── Pseudocode
-│
-└── README.md
-
+├── LICENSE
+└── Readme.md
 ```
+
+> [!NOTE]
+> `Src/ev3dev/wro` is a library. The programs import it, but nothing
+> inside it is meant to be run on its own. Start with
+> [`Src/ev3dev/README.md`](Src/ev3dev/README.md), which covers
+> installation, the calibration sequence and how to run each challenge.
 
 
 ---
@@ -1083,10 +1177,17 @@ docs/engineering_journal.md
 | 4 Jul 2026 | Initial PD controller prototype |
 | 8 Jul 2026 | PCB manufacturing |
 | 10 Jul 2026 | PCB assembly and testing |
-| 13 Jul 2026 | FSM implementation |
+| 13 Jul 2026 | First control software beta |
 | 21 Jul 2026 | I²C communication completed |
-| 27 Jul 2026 | Final hardware integration |
+| 27 Jul 2026 | Sensor multiplexer integrated, 3D printed mounts fitted |
 | 28 Jul 2026 | Final robot assembly |
+| 24 Aug 2026 | Faulty Arduino Nano diagnosed after four weeks |
+| 28 Aug 2026 | Open challenge completed on track |
+| 6 Sep 2026 | IMU integrated for corner counting |
+| 12 Sep 2026 | Migration to Python on ev3dev; Nano moved from I²C to USB |
+| 13 Sep 2026 | Steering travel measured; steering command defect found and fixed |
+| 13 Sep 2026 | Dead ultrasonic sensor diagnosed and repaired |
+| 14 Sep 2026 | Camera hold-over, nearest-block selection, false corner rejection |
 
 
 ---
@@ -1118,11 +1219,12 @@ Compared with the earliest prototypes, the final platform incorporates:
 
 
 ✅ Custom-designed PCB  
-✅ Arduino Nano coprocessor  
+✅ Arduino Nano coprocessor streaming over USB  
 ✅ Ackermann steering system  
-✅ Automatic steering calibration  
-✅ Adaptive Dual PD controller  
-✅ Modular software architecture  
+✅ Automatic steering calibration, measured against the mechanical stops  
+✅ Proportional wall-centring with measured, documented gains  
+✅ Camera avoidance with hold-over and nearest-block selection  
+✅ Modular Python software architecture  
 ✅ Improved mechanical reliability  
 
 
