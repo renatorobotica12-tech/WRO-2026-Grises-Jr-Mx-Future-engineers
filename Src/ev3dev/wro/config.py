@@ -1,135 +1,136 @@
-"""Configuracion del robot: puertos, cableado y ganancias.
+"""Robot configuration: ports, wiring and gains.
 
-Todo lo que hay que tocar en pista deberia estar en este archivo.
-Los valores vienen del programa EV3 `OPEN_ARD` y de los programas Arduino
-`WRO OPEN ARD-UNO.mp` y `WRO OBS ARD-UNO.mp` de Arath.
+Everything that needs adjusting at the track should live in this file.
+
+Most values here are measured rather than chosen. Where that is the case
+the comment says how it was measured and what the number means, because
+a tuning value with no recorded reasoning is one nobody dares change.
 """
 
 # --------------------------------------------------------------------
-# Puertos
+# Ports
 # --------------------------------------------------------------------
 
 PUERTO_IMU = 'ev3-ports:in2'        # mindsensors AbsoluteIMU
-PUERTO_HUSKY = 'ev3-ports:in3'      # HuskyLens por el adaptador OFDL
-PUERTO_ARD = 'ev3-ports:in4'        # solo si el Nano va por I2C
+PUERTO_HUSKY = 'ev3-ports:in3'      # HuskyLens via the OFDL adapter
+PUERTO_ARD = 'ev3-ports:in4'        # only if the Nano runs over I2C
 
-# Confirmado en el robot: los DOS motores son medianos (lego-ev3-m-motor),
-# y no hay nada en C ni en D. No coincide con OPEN_ARD_EQUIVALENCIA.md,
-# que hablaba de un motor grande en D.
-PUERTO_TRACCION = 'outB'            # motor mediano
-PUERTO_VOLANTE = 'outA'             # motor mediano
+# Confirmed on the robot: BOTH motors are medium ones
+# (lego-ev3-m-motor), and there is nothing on C or D.
+PUERTO_TRACCION = 'outB'            # medium motor
+PUERTO_VOLANTE = 'outA'             # medium motor
 
 # --------------------------------------------------------------------
-# Arduino Nano multiplexor de ultrasonicos
+# Arduino Nano ultrasonic hub
 # --------------------------------------------------------------------
 
-# 'serial' -> firmware ultrasonic_hub_serial, Nano al puerto USB del ladrillo
-# 'i2c'    -> firmware ultrasonic_hub_packet, Nano a un puerto de sensores
+# 'serial' -> ultrasonic_hub_serial firmware, Nano on the brick's USB port
+# 'i2c'    -> ultrasonic_hub_packet firmware, Nano on a sensor port
 ARD_BACKEND = 'serial'
 
-ARD_PUERTO_SERIE = None             # None = autodetectar /dev/ttyUSB* o ttyACM*
+ARD_PUERTO_SERIE = None             # None = auto-detect /dev/ttyUSB* or ttyACM*
 ARD_BAUDIOS = 115200
-ARD_ESPERA_ARRANQUE = 2.0           # el Nano se reinicia al abrir el puerto
+ARD_ESPERA_ARRANQUE = 2.0           # opening the port resets the Nano
 
-# Alimentacion del Nano desde un puerto de motores, tratandolo como motor
-# de corriente continua. Los datos siguen yendo por USB.
-# Pongan None si el Nano se alimenta solo por USB.
+# Powering the Nano from a motor port, driven as a DC motor. Data still
+# travels over USB; this is current only.
+# Set to None if the Nano is powered over USB alone.
 #
-# El ciclo de trabajo DEBE ser 100: por debajo la salida del EV3 es una
-# onda cuadrada, no continua, y el regulador del Nano lo pasaria mal.
+# The duty cycle MUST be 100: below that the EV3 output is a square wave
+# rather than continuous, and the Nano's regulator would struggle.
 ARD_ALIMENTACION_PUERTO = 'outD'
 ARD_ALIMENTACION_DUTY = 100
-ARD_ALIMENTACION_ESPERA = 1.5       # segundos antes de abrir el puerto serie
+ARD_ALIMENTACION_ESPERA = 1.5       # seconds before opening the serial port
 
-ARD_DIRECCION = 0x08                # solo para ARD_BACKEND = 'i2c'
-ARD_FIRMWARE = 'packet'             # 'packet' o 'byte'
+ARD_DIRECCION = 0x08                # only for ARD_BACKEND = 'i2c'
+ARD_FIRMWARE = 'packet'             # 'packet' or 'byte'
 
-# Indices base cero dentro de la trama.
-# Verificado en el robot con `check_hw.py mapear`, tapando un sensor a la
-# vez. Coincide con lo que decia documentos/OPEN_ARD_EQUIVALENCIA.md.
-IDX_IZQ = (0, 1)                    # 90izq y 25izq
+# Zero-based indices within the frame.
+# Verified on the robot with `check_hw.py mapear`, covering one sensor at
+# a time.
+IDX_IZQ = (0, 1)                    # left 90 and left 25
 IDX_FRONTAL = 2
-IDX_DER = (3, 4)                    # 25der y 90der
+IDX_DER = (3, 4)                    # right 25 and right 90
 
-ARD_FUERA_DE_RANGO = 125            # valor de sustitucion del firmware
+ARD_FUERA_DE_RANGO = 125            # the firmware's out-of-range sentinel
 
 # --------------------------------------------------------------------
-# Filtrado de las distancias
+# Distance filtering
 # --------------------------------------------------------------------
 #
-# Esto NO esta en el programa de Arath: es un anadido deliberado.
+# When an ultrasonic sensor gets no echo, the firmware returns 125 and
+# clears its validity bit. 125 is not a distance, it is a sentinel. Added
+# straight into the error, a single sensor dropout makes the error jump
+# by 80 cm and the steering slams to full lock. Measured with
+# `check_hw.py lazo`: the error went from +5 to -82 and back to +31 in
+# under a second, with the robot standing still.
 #
-# Cuando un ultrasonico no recibe eco, el firmware devuelve 125 y baja su
-# bit de validez. 125 no es una distancia, es un centinela. Sumandolo tal
-# cual al error, un solo parpadeo de un sensor hace que el error salte
-# 80 cm y el volante pegue un volantazo al tope. Medido con
-# `check_hw.py lazo`: el error salto de +5 a -82 y volvio a +31 en menos
-# de un segundo, con el robot inmovil.
-#
-# Con el filtro, un sensor que se queda sin eco conserva su ultima
-# lectura buena durante ARD_RETENCION segundos; si sigue sin eco despues
-# de eso, se da por "no hay pared cerca" y se usa ARD_DISTANCIA_MAXIMA.
+# With the filter, a sensor that loses its echo keeps its last good
+# reading for ARD_RETENCION seconds. If it is still silent after that,
+# it is taken to mean "no wall nearby" and ARD_DISTANCIA_MAXIMA is used.
 ARD_FILTRAR = True
 
-# Tope util de distancia, en cm. Mas alla de esto la lectura no aporta
-# nada para centrarse entre paredes y solo mete ruido en el error.
-# El pasillo de Future Engineers es de 1 m; los sensores a 25 grados ven
-# algo mas que la perpendicular, de ahi el margen.
+# Useful distance ceiling, in cm. Beyond this a reading contributes
+# nothing to staying centred between the walls and only adds noise to
+# the error. The Future Engineers corridor is 1 m wide; the sensors at
+# 25 degrees see somewhat further than the perpendicular ones, hence the
+# margin.
 ARD_DISTANCIA_MAXIMA = 100
 
-# Cuanto se conserva la ultima lectura buena de un sensor sin eco.
-# A 44 Hz son unas 22 vueltas de lazo.
+# How long a sensor's last good reading is held when it loses its echo.
+# At 44 Hz this is about 22 control loops.
 ARD_RETENCION = 0.5
 
-# Mediana movil por sensor, para matar picos sueltos que pasan la
-# validez. 1 la desactiva; 3 es suficiente y no agrega retraso notable.
+# Rolling median per sensor, to kill isolated spikes that get through
+# with their validity bit set. 1 disables it; 3 is enough and adds no
+# noticeable lag.
 ARD_MEDIANA = 3
 
 # --------------------------------------------------------------------
 # IMU
 # --------------------------------------------------------------------
 
-# 'driver' -> sensor lego-sensor con driver ms-absolute-imu (recomendado)
-# 'raw'    -> lectura I2C directa de los registros del giroscopio
+# 'driver' -> lego-sensor with the ms-absolute-imu driver (recommended)
+# 'raw'    -> direct I2C reads of the gyro registers
 IMU_BACKEND = 'driver'
 
-IMU_DIRECCION = 0x11                # 0x22 de 8 bits = 0x11 de 7 bits
+IMU_DIRECCION = 0x11                # 0x22 as 8-bit = 0x11 as 7-bit
 IMU_DRIVER = 'ms-absolute-imu'
 IMU_MODO = 'GYRO'
 IMU_EJE = 2                         # 0=X, 1=Y, 2=Z
 
-# Factor para pasar de la lectura cruda a grados por segundo.
+# Factor converting the raw reading into degrees per second.
 #
-# El driver ms-absolute-imu en modo GYRO reporta units = d/s y
-# decimals = 1: el entero crudo viene multiplicado por diez. De ahi sale
-# 0.1 exacto. No es el 0.001 del bloque de EV3-G, que si entrega
-# mili-grados/s.
+# The ms-absolute-imu driver in GYRO mode reports units = d/s and
+# decimals = 1: the raw integer comes multiplied by ten. That gives
+# exactly 0.1.
 #
-# Confirmado midiendo: `check_hw.py escala` con una vuelta completa dio
-# 0.09795, que coincide al 2 %. Se deja 0.1 y no la medicion, porque 0.1
-# es exacto por construccion y la medicion lleva dentro el error de girar
-# el robot a mano. La prueba sirvio para confirmar el eje y el signo.
+# Confirmed by measurement: `check_hw.py escala` over one full turn gave
+# 0.09795, within 2 %. The exact 0.1 is kept rather than the measured
+# value, because 0.1 is exact by construction while the measurement
+# carries the error of turning the robot by hand. What the test really
+# settled was the axis and the sign.
 #
-# Signo POSITIVO confirmado: girando a la derecha, Z acumula positivo.
+# POSITIVE sign confirmed: turning right, Z accumulates positive.
 IMU_ESCALA = 0.1
 
-IMU_MUESTRAS_CALIBRACION = 600      # igual que mpu.calibrar(600) de Arath
-IMU_ZONA_MUERTA = 0.3               # grados/s; equivalente de zonaMuerta(0.3)
+IMU_MUESTRAS_CALIBRACION = 600      # samples averaged for the zero offset
+IMU_ZONA_MUERTA = 0.3               # deg/s below which the robot counts as still
 
 # --------------------------------------------------------------------
 # HuskyLens
 # --------------------------------------------------------------------
 
-# Confirmado en el robot: ev3dev detecta el adaptador como `ev3-uart-84`
-# y sus modos si traen nombre propio, no MODE0/MODE1.
-#   'Data-EV3HSK' -> los datos del recuadro
-#   'Time-EV3HSK' -> otro modo del adaptador, sin usar aqui
+# Confirmed on the robot: ev3dev detects the adapter as `ev3-uart-84`
+# and its modes do carry proper names, not MODE0/MODE1.
+#   'Data-EV3HSK' -> the bounding box data
+#   'Time-EV3HSK' -> another adapter mode, unused here
 HUSKY_MODO = 'Data-EV3HSK'
 
-# Orden real de los ocho valores, medido en el robot. NO es el que dice
-# el README del adaptador (State, ID, X, Y, W, H): el State esta en el
-# indice 5, y cuando no hay deteccion los demas se van a cero.
-# Los indices 6 y 7 siempre salen 0 en este modo.
+# The real ordering of the eight values, measured on the robot. It is NOT
+# the one the adapter's README gives (State, ID, X, Y, W, H): State is at
+# index 5, and when nothing is detected every other value drops to zero.
+# Indices 6 and 7 always read 0 in this mode.
 HUSKY_IDX_X = 0
 HUSKY_IDX_Y = 1
 HUSKY_IDX_W = 2
@@ -137,374 +138,362 @@ HUSKY_IDX_H = 3
 HUSKY_IDX_ID = 4
 HUSKY_IDX_STATE = 5
 
-# Resolucion de la HuskyLens. Se resta para dejar el origen en el centro
-# de la imagen, como el map(x, 0,320, -160,160) de Arath.
+# HuskyLens resolution. Subtracted to put the origin at the centre of the
+# image, so X runs from -160 on the left to +160 on the right.
 HUSKY_CENTRO_X = 160
 HUSKY_CENTRO_Y = 120
 
-# Inversion de ejes, para cuando el lente entrega la imagen al reves.
+# Axis inversion, for when the lens delivers the image the other way up.
 #
-# Con el lente de 125 grados la imagen llega girada respecto del lente
-# original. Se corrige aqui y no en los targets a proposito: invirtiendo
-# el eje, todo lo que viene despues (targets, recortes, signo del volante)
-# sigue significando lo mismo que siempre y no hay que retocar nada mas.
+# Correcting it here rather than in the targets is deliberate: inverting
+# the axis leaves everything downstream -- targets, clamps, steering sign
+# -- meaning exactly what it did before, so swapping a lens does not
+# force a retune of the rest.
 #
-# X es el unico que afecta al comportamiento: es el que usa
-# angulo_esquive(). Con X invertida al reves de como esta montado el
-# lente, el robot esquiva cada bloque por el lado contrario.
+# X is the only one that affects behaviour: it is what angulo_esquive()
+# uses. With X inverted the wrong way for how the lens is fitted, the
+# robot avoids every block on the wrong side.
 #
-# Y no interviene en ninguna decision hoy; se invierte por coherencia,
-# para que el par (X, Y) describa la imagen de verdad.
+# Y takes part in no decision today; it is inverted for consistency, so
+# that the (X, Y) pair genuinely describes the image.
 #
-# Verificado con `check_hw.py husky`: con el bloque a la IZQUIERDA de la
-# camara, X tiene que salir NEGATIVA.
+# Verified with `check_hw.py husky`: with the block to the LEFT of the
+# camera, X must come out NEGATIVE.
 #
-# Con el lente de 125 grados hubo que poner los dos en True, y se
-# comprobo midiendo: izquierda -140, centro -2, derecha +81. Con el lente
-# original la imagen no viene girada, asi que vuelven a False. SI SE
-# CAMBIA DE LENTE OTRA VEZ, hay que volver a medirlo: es lo primero que
-# se rompe y no da error, solo hace que el robot esquive al reves.
+# With a 125-degree lens both had to be True, confirmed by measurement:
+# left -140, centre -2, right +81. With the original lens the image is
+# not rotated, so they go back to False. IF THE LENS IS CHANGED AGAIN,
+# measure this again: it is the first thing to break and it raises no
+# error at all, it just makes the robot avoid on the wrong side.
 HUSKY_INVERTIR_X = False
 HUSKY_INVERTIR_Y = False
 
-# IDs aprendidos en la HuskyLens, en modo reconocimiento de color.
+# IDs learned by the HuskyLens in colour recognition mode.
 #
-# Medidos poniendo cada bloque delante y leyendo el ID, no deducidos:
-# el rojo es el 1 y el verde es el 2. Estuvieron cruzados un tiempo, y el
-# robot funcionaba igual porque los targets tambien estaban cruzados; lo
-# que fallaba era que al ajustar HUSKY_TARGET_ROJO se estaba tocando el
-# verde. Si alguna vez se reaprenden los colores en la camara, hay que
-# volver a medirlo con `check_hw.py husky`.
+# Measured by holding each block in front and reading the ID, not
+# deduced: red is 1 and green is 2. They were swapped for a while, and
+# the robot behaved identically because the targets were swapped too;
+# what actually broke was that adjusting HUSKY_TARGET_ROJO was really
+# adjusting the green one. If the colours are ever re-learned on the
+# camera, measure this again with `check_hw.py husky`.
 HUSKY_ID_ROJO = 1
 HUSKY_ID_VERDE = 2
 
-# ESTE ES EL MANDO PARA AJUSTAR EL ESQUIVE DE LOS PILARES.
+# THIS IS THE KNOB FOR TUNING HOW THE PILLARS ARE AVOIDED.
 #
-# Es la posicion, en pixeles, donde el robot intenta DEJAR el bloque
-# dentro de la imagen mientras lo rodea. El volante corrige hasta que el
-# bloque llega ahi:
+# It is the position, in pixels, where the robot tries to KEEP the block
+# within the image while driving around it. The steering corrects until
+# the block arrives there:
 #
-#   -160  borde izquierdo de la imagen
-#      0  centro
-#   +160  borde derecho
+#   -160  left edge of the image
+#      0  centre
+#   +160  right edge
 #
-# Si el bloque tiene que acabar a la IZQUIERDA de la imagen, es que el
-# robot esta apuntando a la derecha de el, o sea que lo pasa por la
-# DERECHA. Suena al reves la primera vez: es porque la camara mira hacia
-# donde va el robot, no hacia el bloque.
+# If the block has to end up on the LEFT of the image, that means the
+# robot is pointing to the right of it, so it passes on the RIGHT. This
+# sounds backwards the first time: it is because the camera looks where
+# the robot is going, not at the block.
 #
-#   target mas lejos del centro  ->  rodeo mas amplio, se aleja mas
-#   target mas cerca del centro  ->  lo esquiva mas justo
-#   target 0                     ->  apunta al bloque y se lo lleva por
-#                                    delante
+#   target further from centre  ->  wider detour, passes further away
+#   target closer to centre     ->  tighter squeeze past it
+#   target 0                    ->  aims straight at the block and
+#                                   drives into it
 #
-# Van por color para poder abrir mas el rodeo de uno que el del otro.
+# They are per colour so one colour's detour can be opened up more than
+# the other's.
 #
-# Que color lleva que signo se fijo probando en pista, no deduciendolo:
-# la primera version razonada los pasaba por el lado contrario.
+# Which colour takes which sign was settled by testing on track, not by
+# reasoning: the first reasoned version passed them on the wrong sides.
 #
-# OJO: un ID de color intercambiado da exactamente el mismo sintoma que
-# los signos al reves, y se "arregla" igual. `check_hw.py husky` con un
-# bloque de cada color delante dice que ID le toca a cada uno de verdad.
-# El techo real es +-160: X se calcula como raw - HUSKY_CENTRO_X sobre una
-# imagen de 320 px, asi que el bloque no puede estar mas alla. Un target
-# fuera de ese rango es una posicion inalcanzable, y el volante nunca
-# llegaria a centrarse mientras viera el bloque: se quedaria girando hasta
-# que el pilar se saliera del cuadro. Con 150 el lazo todavia cierra.
+# WATCH OUT: swapped colour IDs produce exactly the same symptom as
+# reversed signs, and get "fixed" the same way. `check_hw.py husky` with
+# one block of each colour in front is what actually settles which ID
+# belongs to which.
 #
-# Subidos de 140 a 150 para abrir el rodeo con el lente de 125 grados,
-# que al repartir la misma resolucion sobre mas campo deja los bloques
-# mas pequenos y mas cerca del centro.
-HUSKY_TARGET_ROJO = -150            # a la izquierda -> lo pasa por la derecha
-HUSKY_TARGET_VERDE = +150           # a la derecha  -> lo pasa por la izquierda
+# The real ceiling is +-160: X is computed as raw - HUSKY_CENTRO_X over a
+# 320 px image, so the block can never be beyond that. A target outside
+# that range is a position the block can never reach, and the steering
+# would never straighten out while the block was in view: it would keep
+# turning until the pillar left the frame. At 150 the loop still closes.
+HUSKY_TARGET_ROJO = -150            # left in frame  -> passes on the right
+HUSKY_TARGET_VERDE = +150           # right in frame -> passes on the left
 
-# Recorte del angulo de volante para cada color, como FRACCION del tope.
+# Per-colour clamp on the steering angle, as a FRACTION of the limit.
 #
-# Arath recorta con constrain(..., 75, 110) y constrain(..., 70, 110)
-# sobre un servo centrado en 90 cuyo tope es +-20. En fracciones del tope
-# eso es -0.75..+1.0 y -1.0..+1.0: el recorte apretado va con el color
-# que gira a la derecha, y aqui se mantiene esa correspondencia.
+# The tighter clamp goes with the colour that steers right, so that the
+# robot can cut back harder on one side than the other while rounding a
+# pillar.
 #
-# Van en fracciones y no en grados a proposito: en grados quedarian
-# atados al +-20 de aquel servo y recortarian a un tercio del recorrido
-# real de esta direccion.
-HUSKY_LIMITE_ROJO = (-0.75, 1.0)    # el que da consigna positiva
+# Fractions rather than degrees on purpose: in degrees they would be tied
+# to whatever the steering limit happened to be when they were written,
+# and would silently clamp to the wrong fraction of the travel the moment
+# VOLANTE_LIMITE changed.
+HUSKY_LIMITE_ROJO = (-0.75, 1.0)    # the one that gives a positive command
 HUSKY_LIMITE_VERDE = (-1.0, 1.0)
 
-# Cuanto se sostiene la ultima orden buena de la camara, en segundos.
+# How long the camera's last good command is held, in seconds.
 #
-# Mismo patron que ARD_RETENCION para los ultrasonicos, y por la misma
-# razon: un fallo de una trama no es "el bloque ya no esta".
+# Same pattern as ARD_RETENCION for the ultrasonic sensors, and for the
+# same reason: one failed frame does not mean the block is gone.
 #
-# Resuelve DOS problemas medidos en pista:
+# It solves the dropout problem measured on track: the camera loses the
+# block for one or two loops, control goes back to wall following, which
+# at that instant sees a large error and sends the steering to full lock.
+# Measured: +1.9 degrees to +50.6 and back inside 300 ms, with the block
+# in view the whole time.
 #
-#   1. Parpadeos. La camara pierde el bloque una o dos vueltas y el mando
-#      volvia al seguimiento de pared, que en ese instante veia un error
-#      grande y mandaba el volante al tope. Medido: de +1.9 a +50.6 y de
-#      vuelta en 300 ms, con el bloque delante todo el tiempo.
+# The size comes from the real loop period, not from guesswork: at the
+# 31 Hz measured, each loop is 32 ms, so below that the window expires
+# before the next reading and the hold never engages at all.
 #
-#   2. Alternancia entre bloques. Con dos bloques a la vista, el adaptador
-#      OFDL no entrega siempre el mismo recuadro: va saltando de uno a
-#      otro entre lecturas. Medido: id=1 pidiendo +50.6 (derecha) y 300 ms
-#      despues id=2 pidiendo -27.2 (izquierda). Mientras el bloque
-#      enganchado se siga viendo dentro de esta ventana, los demas se
-#      ignoran.
+# The history of this number is measured, not assumed:
 #
-# El tamano sale del periodo real del lazo, no a ojo: a los 31 Hz medidos
-# cada vuelta son 32 ms, asi que por debajo de eso la ventana expira antes
-# de la siguiente lectura y la retencion no llega a activarse nunca. Con
-# 0.1 s cubre 3 vueltas, que es lo que duraron los parpadeos observados.
+#   0.1  ->  12 % of loops held. Covered the dropouts.
+#   0.3  ->  31 % of loops held, and the block switching was UNCHANGED.
 #
-# Subirlo ayuda si el robot sigue bailando entre dos bloques; bajarlo lo
-# hace mas reactivo. Pasarse es malo: el robot seguiria girando hacia un
-# bloque que ya dejo atras.
+# The second result taught us something: the adapter does not alternate
+# frame by frame, it stays on a different block for longer than any
+# reasonable window. Stretching the window never catches up with it, it
+# only makes the robot act on stale images: at speed 40, a third of the
+# commands with up to 0.3 s of lag.
 #
-# El recorrido de este numero esta medido, no supuesto:
-#
-#   0.1  ->  12 % de vueltas retenidas. Cubria los parpadeos.
-#   0.3  ->  31 % de vueltas retenidas, y el alternado SEGUIA igual.
-#
-# Lo segundo enseño algo: el adaptador no alterna trama a trama, cambia de
-# bloque durante periodos mas largos que la ventana. Alargarla no lo
-# alcanza nunca, solo hace que el robot actue sobre imagenes viejas: a
-# velocidad 40, un tercio de las ordenes con hasta 0.3 s de retraso.
-#
-# Asi que la ventana vuelve a lo que sabe hacer bien, tapar parpadeos, y
-# del alternado se encarga HUSKY_MARGEN_ANCHO, que es el criterio
-# correcto para eso.
+# So the window is back to what it does well, covering dropouts, and the
+# block switching is handled by HUSKY_MARGEN_ANCHO, which is the right
+# tool for it.
 HUSKY_RETENCION = 0.15
 
-# Cuanto mas ancho tiene que verse un bloque nuevo para quitarle el mando
-# al que ya se estaba esquivando. 1.0 acepta cualquiera; 1.2 exige que se
-# vea un 20 % mas ancho.
+# How much wider a new block has to look before it takes control from the
+# one already being avoided. 1.0 accepts any; 1.2 demands it look 20 %
+# wider.
 #
-# El ancho del recuadro es el unico dato de PROXIMIDAD que da el
-# adaptador: los pilares de la pista son todos iguales, asi que el que se
-# ve mas ancho es el que esta mas cerca, y el mas cercano es el que hay
-# que esquivar. Sin este criterio, con dos bloques a la vista el robot
-# recibia ordenes de lados opuestos en vueltas consecutivas: medido,
-# id=1 pidiendo +50.6 (derecha) y 300 ms despues id=2 pidiendo -27.2.
+# The bounding box width is the only PROXIMITY information the adapter
+# provides: the track pillars are all identical, so the one that looks
+# wider is the one that is closer, and the closest is the one that has to
+# be avoided. Without this test, with two blocks in view the robot got
+# commands for opposite sides on consecutive loops: measured, id=1 asking
+# for +50.6 (right) and 300 ms later id=2 asking for -27.2.
 #
-# Es lo que Arath consigue pidiendo los dos primeros recuadros y quedandose
-# con el mas ancho. Este adaptador entrega uno solo por lectura, pero
-# comparando entre lecturas se recupera el mismo criterio.
+# This recovers the "widest box wins" rule. The adapter returns only one
+# box per read, but comparing across reads gets to the same place.
 #
-# El 20 % de margen es histeresis: sin el, dos bloques a distancia
-# parecida se turnarian el mando por el ruido de la medicion.
+# The 20 % margin is hysteresis: without it, two blocks at similar
+# distances would trade control back and forth on measurement noise
+# alone.
 HUSKY_MARGEN_ANCHO = 1.2
 
 # --------------------------------------------------------------------
-# Volante
+# Steering
 # --------------------------------------------------------------------
 
-# Grados del motor que equivalen al tope de direccion.
+# Motor degrees corresponding to full steering lock.
 #
-# Medido con `check_hw.py topes` en este robot:
+# Measured with `check_hw.py topes` on this robot:
 #
-#   tope bajo -88, tope alto +65, centro -12
-#   recorrido forzado 153 grados (empujando al 100 %)
-#   recorrido libre   119 grados (a potencia minima)
+#   low stop -88, high stop +65, centre -12
+#   forced travel 153 degrees (pushing at 100 %)
+#   free travel   119 degrees (at the lowest power)
 #
-# Los 34 de diferencia son el mecanismo flexando contra los topes, no
-# direccion utilizable: el limite sale del recorrido LIBRE, con un 15 %
-# de margen para que el volante no golpee los topes en cada correccion.
-# Del forzado saldria 65, y el volante se pasaria la carrera peleando.
+# The 34 degrees of difference are the mechanism flexing against the
+# stops, not usable steering. The limit comes from the FREE travel, with
+# a 15 % margin so the steering does not hit the stops on every
+# correction. Taking it from the forced travel would give 65, and the
+# steering would spend the race fighting the stops.
 #
-# El +-20 que traia antes venia del servo de Arath (70..110 grados) y era
-# solo el 36 % del recorrido de esta direccion: es otro mecanismo, ese
-# numero nunca tuvo por que servir aqui.
-#
-# Estuvo un tiempo en 30, que era solo la mitad del recorrido disponible,
-# y el volante se quedaba corto de angulo en pista. Despues en 45, puesto
-# a ojo. Este 50.6 es el que calcula `check_hw.py topes` a partir de la
-# medicion de arriba: es el valor medido, no estimado.
+# It sat at 30 for a while, only half the travel available, and the
+# steering ran out of angle on track. Then at 45, set by eye. This 50.6
+# is what `check_hw.py topes` computes from the measurement above: a
+# measured value, not an estimate.
 VOLANTE_LIMITE = 50.6
 
-# Recorte por lado, como FRACCION de VOLANTE_LIMITE.
+# Per-side clamp, as a FRACTION of VOLANTE_LIMITE.
 #
-#   1.0  -> todo el tope disponible hacia ese lado
-#   0.3  -> solo el 30 %
-#   0.0  -> no gira nada hacia ese lado
+#   1.0  -> the full limit towards that side
+#   0.3  -> only 30 %
+#   0.0  -> no turning towards that side at all
 #
-# Van en fracciones y no en grados para que VOLANTE_LIMITE siga siendo el
-# techo mecanico —el que sale de medir los topes— y estos dos sean el
-# mando de ajuste. Cambiar el limite reescala los dos lados a la vez.
+# Fractions rather than degrees so VOLANTE_LIMITE stays the mechanical
+# ceiling -- the one that comes from measuring the stops -- and these two
+# are the tuning knob. Changing the limit rescales both sides at once.
 #
-# Para que sirve: limitar cuanto se puede cerrar el robot hacia un lado
-# sin tocar el otro. Afecta a TODO lo que mueve el volante, tanto el
-# seguimiento de pared como el esquive con camara, porque el recorte se
-# aplica en Robot.girar(), que es por donde pasan los dos.
+# What it is for: capping how far the robot can cut towards one side
+# without touching the other. It affects EVERYTHING that moves the
+# steering, both wall following and camera avoidance, because the clamp
+# is applied in Robot.girar(), which is the single point both pass
+# through.
 #
-# El signo lo fija VOLANTE_SIGNO: consigna positiva gira a la DERECHA.
+# The sign convention is set by VOLANTE_SIGNO: a positive command turns
+# RIGHT.
 VOLANTE_FRACCION_DERECHA = 1.0
 VOLANTE_FRACCION_IZQUIERDA = 1.0
 
-# Ganancia del seguimiento de pared: grados de volante por unidad de
-# error crudo. Este es el mando principal para ajustar la agresividad.
+# Wall-following gain: steering degrees per unit of raw error. This is
+# the main knob for how aggressive the correction is.
 #
-# De donde venia: Arath hace map(error, -100, 100, -limites, +limites),
-# donde la ganancia y el limite son el MISMO numero. Con el recorrido
-# real de esta direccion eso daba 47.2/100 = 0.472, que es la respuesta
-# equivalente a la suya. Se subio a 0.555, 1.2, 2, 3.0 y hasta 10; el 10
-# se eligio cuando el error venia corrompido por un ultrasonico muerto que
-# lo dejaba fijo en +62. Con los cinco sensores sanos el error real de
-# operacion es de 5 a 9, y 10 saturaba el volante todo el tiempo. De ahi
-# la bajada a 3, luego a 1.5, y de vuelta a 3 al subir la velocidad a 70:
-# cuanto mas rapido va, menos tiempo tiene para corregir cada desvio y mas
-# ganancia necesita para que la correccion llegue a tiempo.
-VOLANTE_KP = 3                      # equivalente de Arath: 0.472
+# The history of this number is worth reading before changing it. It went
+# 0.472, 0.555, 1.2, 2, 3.0 and as high as 10. The 10 was chosen while
+# the error was being corrupted by a dead ultrasonic sensor that pinned
+# it at a constant +62. With all five sensors healthy the real operating
+# error is 5 to 9, and a gain of 10 saturated the steering permanently.
+# Hence back down to 3, then 1.5, then back to 3 when the speed went up
+# to 70: the faster it travels, the less time it has to correct each
+# deviation and the more gain it needs for the correction to arrive in
+# time.
+VOLANTE_KP = 3
 
-# Ganancia del seguimiento de pared DENTRO de la prueba de obstaculos.
+# Wall-following gain INSIDE the obstacle challenge.
 #
-# Va aparte de la de arriba a proposito. En la prueba abierta el robot
-# solo tiene que centrarse entre paredes y le conviene ser agresivo; en
-# la de obstaculos, el seguimiento de pared es lo que hace entre bloque y
-# bloque, y una ganancia alta ahi lo deja bailando de pared a pared justo
-# cuando la camara esta a punto de tomar el mando. Suele querer ser mas
-# suave que la de la abierta.
+# Kept separate from the one above on purpose. In the open challenge the
+# robot only has to stay centred between the walls and can afford to be
+# aggressive. In the obstacle challenge, wall following is what happens
+# between one block and the next, and a high gain there leaves the robot
+# swinging wall to wall just as the camera is about to take over. It
+# usually wants to be gentler than the open-challenge gain.
 #
-# Arranca igualada a la de la abierta (1.5), que es la ya ajustada en
-# pista. Es un numero suelto: bajarla aqui no toca a open_ard.py.
+# It is a standalone number: lowering it here does not touch open_ard.py.
 #
-# Solo afecta al camino de los ultrasonicos. El esquive con camara tiene
-# su propia ganancia, que sale de HUSKY_TARGET_* y del tope.
+# It only affects the ultrasonic path. Camera avoidance has its own gain,
+# which comes out of HUSKY_TARGET_* and the steering limit.
 VOLANTE_KP_OBSTACULOS = 1.5
 
-# Error crudo al que el volante llega al tope. No es un mando: sale de
-# los dos valores de arriba y esta aqui para ver que significa el KP.
+# The raw error at which the steering reaches full lock. Not a knob: it
+# is derived from the two values above and sits here to make the meaning
+# of the gain visible.
 #
-# Con KP 3 y tope 50.6 el volante satura con un error de 16.9. Para
-# hacerse una idea: en un pasillo de 1 m, desviarse 10 cm del centro ya da
-# un error de unos 40, porque los cuatro sensores laterales se mueven a la
-# vez (dos se acercan y dos se alejan). O sea que el volante llega al tope
-# a unos 4 cm de descentrado, y por debajo corrige de forma proporcional:
-# hay banda de control de verdad, aunque estrecha.
-# Si serpentea, bajar el KP es lo primero, antes que la velocidad.
+# With KP 3 and a limit of 50.6, the steering saturates at an error of
+# 16.9. For a sense of scale: in a 1 m corridor, drifting 10 cm off
+# centre already produces an error of about 40, because all four side
+# sensors move at once -- two get closer while two get further away. So
+# the steering hits full lock at roughly 4 cm off centre, and below that
+# it corrects proportionally: there is a real control band, though a
+# narrow one.
+#
+# If the robot starts weaving, lowering the gain comes before lowering
+# the speed.
 VOLANTE_ERROR_TOPE = VOLANTE_LIMITE / VOLANTE_KP
 
-# Sentido del volante. Verificado en el robot:
+# Steering direction. Verified on the robot:
 #
-#   consigna positiva -> las ruedas giran a la DERECHA
+#   positive command -> the wheels turn RIGHT
 #
-# y eso es lo correcto, porque el error crudo es
-# -(izquierda - derecha): si el robot se arrima a la pared izquierda, las
-# distancias de la izquierda bajan, el error sale POSITIVO y el volante
-# tiene que ir a la derecha para alejarse. Cierra.
+# and that is the correct sense, because the raw error is
+# -(left - right): if the robot drifts towards the left wall, the left
+# distances fall, the error comes out POSITIVE, and the steering has to
+# go right to move away. It closes.
 #
-# De paso cierra tambien el esquive de la camara: el verde lleva
-# desplazamiento +100, o sea volante a la derecha, y asi el robot pasa por
-# la derecha del bloque verde dejandolo a su izquierda, que es la regla.
+# It also closes for camera avoidance: the green target is positive,
+# which drives the block towards the right of the image, which means the
+# robot passes on the left of it.
 VOLANTE_SIGNO = 1
 
-# Correccion mecanica del centro, en grados de motor.
-# En el programa de Arduino el factor 0.9 sobre un rango centrado en 90
-# desplaza el centro a 81; eso es trim, no ganancia. Aqui va explicito.
-# Notese que el camino de la camara no lleva ese 0.9.
+# Mechanical trim of the centre, in motor degrees. Added to the steering
+# destination, so it shifts the zero without touching the limits.
+#
+# Normally unnecessary, because VOLANTE_AUTOCENTRAR finds the centre
+# against the mechanical stops on every start-up. It is here for a
+# misalignment the auto-centring cannot see.
 VOLANTE_TRIM = 0.0
 
-# Grados/s con que el volante corre hacia la consigna. El servo de Arath
-# se mueve casi instantaneo; con 100 el motor tardaria 0.2 s en ir de
-# centro a tope y el robot iria siempre corrigiendo tarde. El mediano
-# llega a 1560, asi que 600 deja margen de sobra sin maltratar la
-# direccion. Es de los primeros valores a ajustar en pista.
+# Degrees per second at which the steering runs to its commanded angle.
+# At 100 the motor would take 0.2 s to go from centre to full lock and
+# the robot would always be correcting late. The medium motor reaches
+# 1560, so 600 leaves plenty of headroom without abusing the mechanism.
+# One of the first values to tune on track.
 VOLANTE_VELOCIDAD = 600
 
-# Si es True, al iniciar busca el centro chocando contra los topes.
-# Con True, al arrancar busca los dos topes mecanicos y toma el punto
-# medio como cero. Es lo correcto aqui: el recorrido libre medido es de
-# 119 grados, o sea +-59.5, y VOLANTE_LIMITE es 50.6. Centrado de verdad,
-# esos 50.6 caben a los dos lados; partiendo de un cero torcido, el
-# volante chocaria contra un tope antes de llegar al limite por un lado
-# y se quedaria corto por el otro, y eso en pista se confunde con un
-# VOLANTE_TRIM mal puesto.
+# With True, start-up finds both mechanical stops and takes the midpoint
+# as zero. That is the right choice here: the measured free travel is 119
+# degrees, or +-59.5, and VOLANTE_LIMITE is 50.6. Properly centred, those
+# 50.6 fit on both sides. Starting from a crooked zero, the steering
+# would hit a stop before reaching the limit on one side and fall short
+# on the other -- which on track looks exactly like a badly set
+# VOLANTE_TRIM.
 VOLANTE_AUTOCENTRAR = True
-# Potencias con que busca los topes, en orden. Se recorren TODAS, de
-# menor a mayor, y vale la posicion final.
+
+# Duty cycles used to find the stops, in order. ALL of them are walked,
+# lowest to highest, and the final position is the one that counts.
 #
-# Medido en este robot: al 25 % la direccion no se mueve; al 40 % avanza
-# 28 grados y se clava a mitad de camino; hace falta llegar al 100 % para
-# tocar el tope de verdad. Por eso no basta con subir la potencia solo
-# cuando el motor no arranca: hay que subirla siempre.
+# Measured on this robot: at 25 % the steering does not move at all; at
+# 40 % it advances 28 degrees and jams halfway; it takes 100 % to
+# actually reach the stop. So it is not enough to raise the power only
+# when the motor fails to start: it has to be raised every time.
 #
-# Se empieza en 40 porque el 25 no mueve nada y solo gastaria tiempo.
+# It starts at 40 because 25 moves nothing and would only waste time.
 VOLANTE_DUTIES_CENTRADO = (40, 70, 100)
 
 # --------------------------------------------------------------------
-# Traccion y recorrido
+# Drive train and race
 # --------------------------------------------------------------------
 
-# Como se manda la traccion:
+# How the drive train is commanded:
 #
-#   'velocidad' -> el numero es el % de la velocidad maxima del motor y
-#                  el EV3 regula por encoder. Si la rueda se frena contra
-#                  una imperfeccion de la pista, sube la potencia sola
-#                  hasta recuperar la velocidad pedida.
-#   'potencia'  -> el numero es el ciclo de trabajo, como el PWM de
-#                  Arath. Lazo abierto: ante un obstaculo la potencia no
-#                  cambia y el robot se queda clavado.
+#   'velocidad' -> the number is a % of the motor's maximum speed and the
+#                  EV3 regulates using the encoder. If a wheel is slowed
+#                  by a track imperfection, it raises power on its own
+#                  until the commanded speed is recovered.
+#   'potencia'  -> the number is the raw duty cycle. Open loop: against
+#                  an obstacle the power does not change and the robot
+#                  simply stalls.
 #
-# Se cambio a 'velocidad' porque en pista el robot se frenaba con las
-# imperfecciones. Arath no puede hacer esto: su motor no tiene encoder.
+# Changed to 'velocidad' because on track the robot kept bogging down on
+# surface imperfections. This is only possible because the motor has an
+# encoder.
 TRACCION_MODO = 'velocidad'
 
-# De 0 a 100 en los dos modos. En 'velocidad' es el porcentaje de los
-# 1560 grados/s que da el motor mediano, asi que 50 son 780 grados/s
-# SOSTENIDOS, no "50 % de potencia y lo que salga".
+# 0 to 100 in both modes. In 'velocidad' it is a percentage of the 1560
+# deg/s the medium motor delivers, so 50 means 780 deg/s SUSTAINED, not
+# "50 % power and whatever that gives".
 #
-# Cuanto mas rapido va, menos tiempo tiene el volante para corregir cada
-# desvio: si empieza a serpentear, lo primero a bajar es VOLANTE_KP, no
-# la velocidad.
-VELOCIDAD = 70                      # prueba abierta
+# The faster it goes, the less time the steering has to correct each
+# deviation. If it starts weaving, the first thing to lower is
+# VOLANTE_KP, not the speed.
+VELOCIDAD = 70                      # open challenge
 
-# Velocidad de la prueba de obstaculos. DESACOPLADA de la de arriba: aqui
-# va mas lenta a proposito, porque la camara tiene que ver el bloque,
-# decidir el lado y meter el rodeo completo antes de llegar a el. A la
-# velocidad de la abierta llega encima del bloque sin haber terminado de
-# esquivarlo.
-#
-# Arath tambien las tiene distintas (60 en la abierta, 40 en obstaculos).
-#
-# Igualada a 40, que es con la que se probo el esquive en pista con
-# prueba_esquive.py. Estuvo en 35 antes de esas pruebas.
+# Obstacle challenge speed. DECOUPLED from the one above: it runs slower
+# on purpose, because the camera has to see the block, decide which side
+# to pass, and fit the whole detour in before reaching it. At the open
+# challenge speed the robot arrives on top of the block without having
+# finished going around it.
 VELOCIDAD_OBSTACULOS = 40
 
-ESQUINAS_META = 12                  # tres vueltas
-ANGULO_ESQUINA = 87.0               # umbral de |anguloZ| para contar esquina
+ESQUINAS_META = 12                  # three laps
+ANGULO_ESQUINA = 87.0               # |angle| threshold for counting a corner
 
-# Tiempo minimo entre dos esquinas, en segundos.
+# Minimum time between two corners, in seconds.
 #
-# Esto NO esta en el programa de Arath: es un anadido deliberado, y hace
-# falta desde que la camara manda el volante.
+# A deliberate addition, and one that became necessary as soon as the
+# camera started commanding the steering.
 #
-# El problema medido: esquivando un bloque, el volante va al tope y el
-# robot gira de verdad. El giroscopio no distingue ese giro del de una
-# esquina de pista, acumula los 87 grados y suma una esquina que no
-# existe. En una corrida de una vuelta salieron dos esquinas separadas
-# por 1.1 segundos, cuando las reales iban cada 6.
+# The problem, as measured: while avoiding a block the steering goes to
+# full lock and the robot genuinely turns. The gyroscope cannot tell that
+# turn from a track corner, accumulates its 87 degrees and adds a corner
+# that does not exist. In a one-lap run, two corners came out 1.1 seconds
+# apart where the real ones were arriving every 6.
 #
-# En obs_ard.py eso es un fallo de carrera: cada falsa adelanta la meta
-# de 12 y el robot frena a mitad de pista creyendo que ya dio tres
-# vueltas.
+# In obs_ard.py that is a race-losing fault: each false corner brings the
+# target of 12 closer and the robot brakes mid-track believing it has
+# already completed three laps.
 #
-# 1.5 s deja fuera el caso medido con margen y queda muy por debajo de
-# cualquier espaciado real: a la velocidad mas alta que se ha probado las
-# esquinas caen cada 2 o 3 segundos.
+# 1.5 s excludes the measured case with margin and stays well below any
+# real spacing: at the highest speed tested, corners arrive every 2 to 3
+# seconds.
 ESQUINA_INTERVALO_MINIMO = 1.5
-# Cuanto sigue avanzando despues de contar la esquina numero 12, antes de
-# frenar. Durante esa media pasada sigue centrandose entre paredes con los
-# ultrasonicos; no va a ciegas.
-#
-# Arath usa 200 ms. Aqui 500, para que el robot acabe de meterse en la
-# zona de salida en vez de frenar justo al cruzar la ultima esquina.
-MS_EXTRA_AL_FINAL = 500             # prueba abierta (Arath: 200)
-MS_EXTRA_AL_FINAL_OBS = MS_EXTRA_AL_FINAL   # (Arath: 250)
 
-PERIODO_LAZO = 0.02                 # 50 Hz maximo
-
-# Telemetria de obs_ard.py por consola.
+# How much further the robot drives after counting corner number 12,
+# before braking. During that extra half pass it is still centring
+# between the walls with the ultrasonic sensors; it is not driving blind.
 #
-# Va limitada en frecuencia a proposito: el lazo corre a unos 40 Hz, y
-# escribir 40 lineas por segundo por ssh sobre Bluetooth frena el propio
-# lazo que se intenta medir. A 4 Hz se sigue leyendo bien y no estorba.
+# 500 ms rather than something shorter, so the robot finishes inside the
+# start zone instead of braking the moment it clears the last corner.
+MS_EXTRA_AL_FINAL = 500             # open challenge
+MS_EXTRA_AL_FINAL_OBS = MS_EXTRA_AL_FINAL
+
+PERIODO_LAZO = 0.02                 # 50 Hz ceiling
+
+# Console telemetry for obs_ard.py.
+#
+# Rate limited on purpose: the loop runs at about 40 Hz, and writing 40
+# lines a second over ssh on a Bluetooth link slows down the very loop it
+# is trying to measure. At 4 Hz it is still readable and stays out of the
+# way.
 OBS_TELEMETRIA = True
 OBS_TELEMETRIA_HZ = 4
