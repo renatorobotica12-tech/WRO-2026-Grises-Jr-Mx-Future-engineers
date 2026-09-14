@@ -1,0 +1,14 @@
+# Cache de Python. Se regenera solo al importar y no aporta nada al
+# repositorio; ademas se compila para ARM en el ladrillo, asi que ni
+# siquiera sirve en otra maquina.
+__pycache__/
+*.py[cod]
+
+# Configuracion local del editor, especifica de cada equipo.
+.vscode/
+.idea/
+
+# Archivos temporales del sistema.
+Thumbs.db
+desktop.ini
+.DS_Store
