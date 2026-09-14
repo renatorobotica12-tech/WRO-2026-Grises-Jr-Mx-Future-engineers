@@ -11,10 +11,22 @@
 
 ![WRO 2026](https://img.shields.io/badge/WRO-2026-005BBB?style=for-the-badge)
 ![Future Engineers](https://img.shields.io/badge/Future_Engineers-Category-00A86B?style=for-the-badge)
-![LEGO EV3](https://img.shields.io/badge/Main_Controller-LEGO_EV3-F7C600?style=for-the-badge)
-![Arduino Nano](https://img.shields.io/badge/Coprocessors-2_Arduino_Nano-00979D?style=for-the-badge)
+![Mexico](https://img.shields.io/badge/México-🇲🇽-006847?style=for-the-badge)
+
+<br>
+
+![LEGO EV3](https://img.shields.io/badge/Controller-LEGO_EV3-F7C600?style=for-the-badge&logo=lego&logoColor=white)
+![ev3dev](https://img.shields.io/badge/OS-ev3dev_Debian-A81D33?style=for-the-badge&logo=debian&logoColor=white)
+![Python](https://img.shields.io/badge/Control-Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Arduino](https://img.shields.io/badge/Coprocessor-Arduino_Nano-00979D?style=for-the-badge&logo=arduino&logoColor=white)
+
+<br>
+
 ![Custom PCB](https://img.shields.io/badge/Electronics-Custom_PCB-6A5ACD?style=for-the-badge)
 ![HuskyLens](https://img.shields.io/badge/Vision-HuskyLens_AI-FF4500?style=for-the-badge)
+![Ultrasonic](https://img.shields.io/badge/Ranging-5×_Ultrasonic-FF8C00?style=for-the-badge)
+![Gyro](https://img.shields.io/badge/Heading-AbsoluteIMU-8E44AD?style=for-the-badge)
+![Loop](https://img.shields.io/badge/Control_Loop-~30_Hz-2E8B57?style=for-the-badge)
 
 <br>
 
@@ -75,37 +87,41 @@ The final platform combines:
 
 <div align="center">
 
-```
-   ┌──────────────────┐          ┌──────────────────┐
-   │ HuskyLens Camera │          │ Ultrasonic x5    │
-   └────────┬─────────┘          └────────┬─────────┘
-            │                             │
-            │                             ▼
-            │                    ┌──────────────────┐
-            │                    │    Custom PCB    │
-            │                    └────────┬─────────┘
-            │                             │
-            ▼                             ▼
-   ┌──────────────────┐          ┌──────────────────┐
-   │   OFDL adapter   │          │   Arduino Nano   │
-   └────────┬─────────┘          └────────┬─────────┘
-            │                             │
-       LEGO UART                     USB serial
-      (sensor port 3)                 115200 baud
-            │                             │
-            └──────────────┬──────────────┘
-                           ▼
-                  ┌──────────────────┐     ┌──────────────┐
-                  │     LEGO EV3     │◄────│ AbsoluteIMU  │
-                  │  running ev3dev  │ I²C │  (gyroscope) │
-                  └────────┬─────────┘     └──────────────┘
-                           │
-            ┌──────────────┴──────────────┐
-            ▼                             ▼
-   ┌──────────────────┐          ┌──────────────────┐
-   │  Steering Motor  │          │   Drive Motor    │
-   │     (port A)     │          │     (port B)     │
-   └──────────────────┘          └──────────────────┘
+```mermaid
+flowchart TD
+    HUSKY["📷 HuskyLens Camera"]
+    ULTRA["📡 Ultrasonic Sensors ×5"]
+    IMU["🧭 AbsoluteIMU"]
+
+    OFDL["OFDL UART Adapter"]
+    PCB["🔌 Custom PCB"]
+    NANO["⚙️ Arduino Nano"]
+
+    EV3["🧠 LEGO EV3<br/><i>running ev3dev</i>"]
+
+    STEER["🔄 Steering Motor<br/>port A"]
+    DRIVE["🚗 Drive Motor<br/>port B"]
+
+    HUSKY --> OFDL
+    ULTRA --> PCB
+    PCB --> NANO
+
+    OFDL -->|"LEGO UART · port 3"| EV3
+    NANO -->|"USB serial · 115200 baud"| EV3
+    IMU -->|"I²C · port 2"| EV3
+
+    EV3 --> STEER
+    EV3 --> DRIVE
+
+    classDef sensor fill:#FFE0B2,stroke:#E65100,stroke-width:2px,color:#000
+    classDef bridge fill:#B3E5FC,stroke:#01579B,stroke-width:2px,color:#000
+    classDef brain  fill:#C8E6C9,stroke:#1B5E20,stroke-width:3px,color:#000
+    classDef motor  fill:#F8BBD0,stroke:#880E4F,stroke-width:2px,color:#000
+
+    class HUSKY,ULTRA,IMU sensor
+    class OFDL,PCB,NANO bridge
+    class EV3 brain
+    class STEER,DRIVE motor
 ```
 
 </div>
@@ -149,6 +165,19 @@ at 115200 baud removed that bottleneck and freed a sensor port.
 - [📓 Engineering Journal](#-engineering-journal)
 - [📂 Repository Structure](#-repository-structure)
 - [🏁 Conclusion](#-conclusion)
+
+---
+
+<div align="center">
+
+### 📚 Jump straight to the detail
+
+[![Journal](https://img.shields.io/badge/📓-Engineering_Journal-4A148C?style=for-the-badge)](docs/Engineering%20Journal.md)
+[![Tuning](https://img.shields.io/badge/📊-Tuning_Log-E65100?style=for-the-badge)](docs/Logs_Tuning.md)
+[![Maths](https://img.shields.io/badge/🧮-Control_Model-01579B?style=for-the-badge)](docs/Control_Model.md)
+[![Code](https://img.shields.io/badge/💻-Software_Guide-1B5E20?style=for-the-badge)](Src/ev3dev/README.md)
+
+</div>
 
 
 ---
@@ -633,35 +662,49 @@ This distributed architecture provides:
 <div align="center">
 
 
-```
-          Ultrasonic Sensors
-              │ │ │ │ │
-              ▼ ▼ ▼ ▼ ▼
+```mermaid
+flowchart LR
+    subgraph ACQ ["📡 Acquisition"]
+        direction TB
+        U1["Ultrasonic 1<br/>left 90°"]
+        U2["Ultrasonic 2<br/>left 25°"]
+        U3["Ultrasonic 3<br/>front"]
+        U4["Ultrasonic 4<br/>right 25°"]
+        U5["Ultrasonic 5<br/>right 90°"]
+    end
 
-          ┌────────────┐
-          │ Custom PCB │
-          └─────┬──────┘
-                │
+    subgraph ROUTE ["🔌 Routing"]
+        PCB["Custom PCB"]
+        NANO["Arduino Nano<br/><i>trig / echo · 9 ms apart</i>"]
+    end
 
-          ┌────────────┐
-          │ Arduino    │
-          │ Nano       │
-          └─────┬──────┘
-                │
-           USB serial
-          115200 baud
+    subgraph DEC ["🧠 Decision"]
+        EV3["LEGO EV3<br/><i>ev3dev · Python</i>"]
+    end
 
-                │
+    subgraph ACT ["⚙️ Actuation"]
+        MA["Steering · port A"]
+        MB["Drive · port B"]
+        MD["Nano power · port D"]
+    end
 
-          ┌────────────┐
-          │ LEGO EV3   │
-          │ Brick      │
-          └─────┬──────┘
+    U1 & U2 & U3 & U4 & U5 --> PCB
+    PCB --> NANO
+    NANO -->|"USB · 115200 baud<br/>≈110 lines/s"| EV3
+    EV3 --> MA
+    EV3 --> MB
+    EV3 -.->|"dc-motor · 100% duty"| MD
+    MD -.->|"power"| NANO
 
-                │
+    classDef s fill:#FFE0B2,stroke:#E65100,color:#000
+    classDef r fill:#B3E5FC,stroke:#01579B,color:#000
+    classDef d fill:#C8E6C9,stroke:#1B5E20,stroke-width:3px,color:#000
+    classDef a fill:#F8BBD0,stroke:#880E4F,color:#000
 
-      Steering Motor + Drive Motor
-
+    class U1,U2,U3,U4,U5 s
+    class PCB,NANO r
+    class EV3 d
+    class MA,MB,MD a
 ```
 
 </div>
@@ -783,40 +826,51 @@ This organization improves:
 Every start-up runs the same three-stage sequence before the robot is
 allowed to move:
 
-```
-START
-  ↓
-Power the Nano from port D, then open the serial link
-  ↓
-Find both steering stops, take the midpoint as centre
-  ↓
-Calibrate the gyroscope zero  (robot must be still)
-  ↓
-Print the values actually in use
-  ↓
-Wait for the centre button
-  ↓
-┌─────────────── CONTROL LOOP, ~30 Hz ───────────────┐
-│                                                     │
-│  Read camera, ultrasonics and gyroscope             │
-│           ↓                                         │
-│  Corner?  accumulated turn ≥ 87° and not too soon   │
-│           after the last one  →  count it           │
-│           ↓                                         │
-│  Drive at the configured speed                      │
-│           ↓                                         │
-│  Steering:  camera sees a block  →  avoid it        │
-│             otherwise            →  centre between  │
-│                                     the walls       │
-│           ↓                                         │
-│  12 corners reached?  →  run on briefly, then stop  │
-│                                                     │
-└─────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    A(["🏁 START"]) --> B["🔌 Power the Nano from port D<br/>open the serial link"]
+    B --> C["🎯 Find both steering stops<br/>midpoint becomes centre"]
+    C --> D["🧭 Calibrate gyroscope zero<br/><i>robot must be still</i>"]
+    D --> E["📋 Print the values actually in use"]
+    E --> F{{"⏸️ Wait for centre button"}}
+
+    F --> G["📥 Read camera · ultrasonics · gyroscope"]
+    G --> H{"Turn ≥ 87°<br/>and ≥ 1.5 s since<br/>the last corner?"}
+
+    H -->|yes| I["➕ Count corner"]
+    H -->|no| J
+    I --> J{"12 corners<br/>reached?"}
+
+    J -->|yes| K["🛬 Run on 500 ms<br/>still following walls"]
+    K --> L(["🛑 STOP"])
+
+    J -->|no| M["🚗 Drive at configured speed"]
+    M --> N{"Camera sees<br/>a block?"}
+
+    N -->|yes| O["👁 Steer around it<br/>by its colour"]
+    N -->|no| P["📏 Centre between the walls"]
+
+    O --> G
+    P --> G
+
+    classDef setup  fill:#E1BEE7,stroke:#4A148C,stroke-width:2px,color:#000
+    classDef sense  fill:#FFE0B2,stroke:#E65100,stroke-width:2px,color:#000
+    classDef choice fill:#FFF9C4,stroke:#F57F17,stroke-width:2px,color:#000
+    classDef act    fill:#C8E6C9,stroke:#1B5E20,stroke-width:2px,color:#000
+    classDef stop   fill:#FFCDD2,stroke:#B71C1C,stroke-width:3px,color:#000
+
+    class B,C,D,E setup
+    class G sense
+    class H,J,N,F choice
+    class I,M,O,P act
+    class K,L stop
 ```
 
-The order inside the loop is deliberate. The drive motor is given the
-speed computed on the *previous* iteration, so a corner detected on this
-iteration stops the robot without one last burst of throttle.
+> [!NOTE]
+> The order inside the loop is deliberate. The drive motor is given the
+> speed computed on the **previous** iteration, so a corner detected on
+> this iteration stops the robot without one last burst of throttle.
+
 ---
     
 # 📡 Ultrasonic Sensor Fusion
@@ -1111,9 +1165,13 @@ The journal includes:
 - Performance analysis.
 
 
-📄 [**docs/Engineering Journal.md**](docs/Engineering%20Journal.md)
-
-📄 [**docs/Logs_Tuning.md**](docs/Logs_Tuning.md) — the controller tuning log, iteration by iteration
+| Document | What it covers |
+|:---|:---|
+| 📓 [**Engineering Journal**](docs/Engineering%20Journal.md) | The development story, entry by entry — including the failures |
+| 📊 [**Tuning Log**](docs/Logs_Tuning.md) | Controller tuning, iteration by iteration, with observed behaviour |
+| 🧮 [**Mathematical Control Model**](docs/Control_Model.md) | Every equation and constant, derived and cross-checked against measurement |
+| 🔧 [**Software Guide**](Src/ev3dev/README.md) | Installation, the calibration sequence, and how to run each challenge |
+| 🔌 [**Ports and Components**](mechanic/List%20of%20ports%20and%20components.md) | The complete wiring, verified on the robot |
 
 
 ---
@@ -1147,6 +1205,7 @@ The journal includes:
 ├── docs
 │   ├── Engineering Journal.md
 │   ├── Logs_Tuning.md            Controller tuning, iteration by iteration
+│   ├── Control_Model.md          Every equation and constant, derived
 │   ├── OPEN_ARD_EQUIVALENCIA.md
 │   ├── PROTOCOLO_I2C_MULTIPLEXOR.md     The Nano's I2C frame format
 │   └── BLOQUE_GIRO_ABSOLUTEIMU_EV3.md   Gyroscope integration
