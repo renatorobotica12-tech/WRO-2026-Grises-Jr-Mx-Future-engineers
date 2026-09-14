@@ -1,11 +1,12 @@
-"""Utilidades numericas equivalentes a las de Arduino / Mind+."""
+"""Numeric helpers shared by the control code."""
 
 
 def map_range(value, from_low, from_high, to_low, to_high):
-    """Equivalente exacto de map() de Arduino, pero en punto flotante.
+    """Rescale a value from one range to another, in floating point.
 
-    Arduino usa enteros y trunca; aqui no se trunca porque el EV3 trabaja
-    con flotantes y truncar solo agrega ruido al control.
+    Integer implementations of this truncate. This one does not: the EV3
+    works in floating point, and truncating here would only add noise to
+    the control loop.
     """
     span = from_high - from_low
     if span == 0:
@@ -14,7 +15,7 @@ def map_range(value, from_low, from_high, to_low, to_high):
 
 
 def constrain(value, minimum, maximum):
-    """Equivalente de constrain() de Arduino."""
+    """Clamp a value between two bounds."""
     if value < minimum:
         return minimum
     if value > maximum:
@@ -23,5 +24,5 @@ def constrain(value, minimum, maximum):
 
 
 def clamp_abs(value, limit):
-    """Limita el valor a +-limit."""
+    """Clamp a value to +-limit."""
     return constrain(value, -limit, limit)
