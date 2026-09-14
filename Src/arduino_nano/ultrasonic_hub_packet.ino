@@ -5,11 +5,20 @@
 #define MAX_DISTANCE_CM 128
 #define OUT_OF_RANGE_DISTANCE 125
 
-// Una trama I2C ocupa 8 bytes:
-// [0..4] distancia de cada sensor en cm
-// [5]    mascara de validez (bits 0..4)
-// [6]    contador de trama
-// [7]    checksum XOR de los bytes 0..6
+// Five-sensor ultrasonic hub as an I2C slave, publishing whole frames.
+//
+// Superseded by ultrasonic_hub_serial.ino, which runs over USB instead.
+// Kept because it is the fallback if the USB path is ever unavailable.
+//
+// An I2C frame is 8 bytes:
+// [0..4] distance from each sensor, in cm
+// [5]    validity mask (bits 0..4)
+// [6]    frame counter
+// [7]    XOR checksum of bytes 0..6
+//
+// The checksum and the frame counter are what make this readable over a
+// noisy bus: the EV3 can reject a corrupt frame instead of acting on it,
+// and can tell a fresh sweep from a repeated one.
 #define PACKET_SIZE 8
 
 #define ECHO_TIMEOUT_US ((MAX_DISTANCE_CM * 58UL) + 500UL)
@@ -49,7 +58,7 @@ void loop()
   byte nextDistances[NUM_SENSORS];
   byte nextValidMask = 0;
 
-  // Completar las cinco mediciones antes de publicar una trama nueva.
+  // Finish all five measurements before publishing a new frame.
   for (byte i = 0; i < NUM_SENSORS; i++) {
     unsigned long measurementStart = micros();
     bool valid = false;
@@ -65,7 +74,9 @@ void loop()
     }
   }
 
-  // Publicar todos los campos como una instantanea coherente.
+  // Publish every field as one coherent snapshot. Interrupts are
+  // disabled for the copy so an I2C request cannot land halfway through
+  // and return a frame mixing two different sweeps.
   noInterrupts();
   for (byte i = 0; i < NUM_SENSORS; i++) {
     distanceCm[i] = nextDistances[i];

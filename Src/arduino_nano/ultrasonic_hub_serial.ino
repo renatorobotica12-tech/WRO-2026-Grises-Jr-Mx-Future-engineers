@@ -1,24 +1,31 @@
-// Multiplexor de cinco ultrasonicos que habla por USB en vez de I2C.
+// Five-sensor ultrasonic hub that talks over USB instead of I2C.
 //
-// El Nano se conecta con su propio cable USB al puerto USB del ladrillo
-// EV3. En ev3dev aparece como /dev/ttyUSB0 (chip CH340) o /dev/ttyACM0.
+// The Nano is connected by its own USB cable to the EV3 brick's USB
+// port. Under ev3dev it appears as /dev/ttyUSB0 (CH340 chip) or
+// /dev/ttyACM0.
 //
-// Ventaja sobre la version I2C: el I2C de los puertos de sensores del EV3
-// es por software y va a pocos kHz. A 115200 baudios sobra ancho de banda
-// y ademas se libera un puerto de sensores.
+// Why this rather than the I2C version: the I2C on the EV3 sensor ports
+// is not hardware, the brick bit-bangs it in software and it runs at a
+// few kHz. At 115200 baud there is bandwidth to spare, and it frees up a
+// sensor port as well.
 //
-// Formato de linea, ASCII terminado en \n:
+// Line format, ASCII terminated with \n:
 //
-//   U d1 d2 d3 d4 d5 mascara trama checksum
+//   U d1 d2 d3 d4 d5 mask frame checksum
 //
-//   d1..d5    distancia de cada sensor en cm
-//   mascara   bits 0..4, uno por sensor: 1 = medicion valida
-//   trama     contador de barridos completos, 0..255
-//   checksum  XOR de los siete numeros anteriores
+//   d1..d5    distance from each sensor, in cm
+//   mask      bits 0..4, one per sensor: 1 = valid measurement
+//   frame     counter of complete sweeps, 0..255
+//   checksum  XOR of the seven preceding numbers
 //
-// Se imprime una linea despues de CADA sensor, no de cada barrido, para
-// que el EV3 siempre tenga el dato mas fresco posible. Son unas 110
-// lineas por segundo.
+// A line is printed after EVERY sensor, not after every sweep, so the
+// EV3 always has the freshest reading available. That works out to about
+// 110 lines per second.
+//
+// OUT_OF_RANGE_DISTANCE is a sentinel, not a distance. The validity bit
+// is what tells a real 125 cm reading apart from a missing echo, and the
+// EV3 side depends on that distinction: fed as a distance, one dropout
+// looks like an 80 cm jump and slams the steering to full lock.
 
 #define NUM_SENSORS 5
 #define MAX_DISTANCE_CM 128
@@ -28,7 +35,7 @@
 #define ECHO_TIMEOUT_US ((MAX_DISTANCE_CM * 58UL) + 500UL)
 #define SENSOR_PERIOD_US 9000UL
 
-// Mismo cableado que las versiones I2C.
+// Same wiring as the I2C versions.
 const byte trigPins[NUM_SENSORS] = {11, 9, 7, 5, 3};
 const byte echoPins[NUM_SENSORS] = {12, 10, 8, 6, 4};
 
@@ -73,7 +80,8 @@ void loop()
 
     sendFrame();
 
-    // Separacion minima entre disparos para no arrastrar ecos cruzados.
+    // Minimum spacing between triggers, so an echo from one sensor is
+    // not still in the air when the next one fires.
     unsigned long elapsed = micros() - measurementStart;
     if (elapsed < SENSOR_PERIOD_US) {
       delayMicroseconds((unsigned int)(SENSOR_PERIOD_US - elapsed));
