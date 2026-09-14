@@ -1,3 +1,13 @@
+// Five-sensor ultrasonic hub as an I2C slave, one byte per request.
+//
+// This is the oldest of the three firmwares. The EV3 writes which sensor
+// it wants, then reads back a single distance byte, so a full set of
+// five readings costs five I2C transactions.
+//
+// Superseded twice over: ultrasonic_hub_packet.ino returns all five in
+// one 8-byte frame with a checksum, and ultrasonic_hub_serial.ino drops
+// I2C altogether and streams over USB. Kept for reference.
+
 #include <Wire.h>
 
 #define I2C_ADDRESS 0x08
@@ -5,17 +15,17 @@
 #define MAX_DISTANCE 128
 #define OUT_OF_RANGE_DISTANCE 125
 
-// 128 cm requieren unos 7424 us de ida y vuelta. Se deja un pequeno
-// margen y se inicia una medicion nueva cada 9 ms.
+// 128 cm takes about 7424 us there and back. A small margin is added,
+// and a new measurement is started every 9 ms.
 #define ECHO_TIMEOUT_US ((MAX_DISTANCE * 58UL) + 500UL)
 #define SENSOR_PERIOD_US 9000UL
 
-// Orden confirmado de conexiones.
+// Confirmed wiring order.
 // Sensor:                       1   2   3   4   5
 const byte trigPins[NUM_SENSORS] = {11, 9, 7, 5, 3};
 const byte echoPins[NUM_SENSORS] = {12, 10, 8, 6, 4};
 
-// Distancias que recibirá el EV3.
+// The distances the EV3 will read.
 volatile byte distanceCm[NUM_SENSORS] = {
   OUT_OF_RANGE_DISTANCE,
   OUT_OF_RANGE_DISTANCE,
@@ -24,7 +34,7 @@ volatile byte distanceCm[NUM_SENSORS] = {
   OUT_OF_RANGE_DISTANCE
 };
 
-// Sensor solicitado por el EV3: 1, 2, 3, 4 o 5.
+// Which sensor the EV3 asked for: 1, 2, 3, 4 or 5.
 volatile byte requestedSensor = 1;
 
 byte readUltrasonic(byte trigPin, byte echoPin);
@@ -33,14 +43,14 @@ void requestEvent();
 
 void setup()
 {
-  // Configurar los cinco sensores.
+  // Set up all five sensors.
   for (byte i = 0; i < NUM_SENSORS; i++) {
     pinMode(trigPins[i], OUTPUT);
     pinMode(echoPins[i], INPUT);
     digitalWrite(trigPins[i], LOW);
   }
 
-  // Arduino Nano como esclavo I2C.
+  // The Nano acts as an I2C slave.
   Wire.begin(I2C_ADDRESS);
   Wire.onReceive(receiveEvent);
   Wire.onRequest(requestEvent);
@@ -48,7 +58,7 @@ void setup()
 
 void loop()
 {
-  // Leer los cinco sensores uno por uno.
+  // Read the five sensors one at a time.
   for (byte i = 0; i < NUM_SENSORS; i++) {
     unsigned long measurementStart = micros();
 
@@ -57,12 +67,12 @@ void loop()
       echoPins[i]
     );
 
-    // Es una variable de un byte, por lo que la actualización
-    // es atómica en el Arduino Nano.
+    // A single-byte variable, so the update is atomic on the Nano and
+    // an I2C interrupt cannot catch it half written.
     distanceCm[i] = value;
 
-    // Mantener una separacion minima entre disparos para reducir ecos
-    // cruzados, sin imponer los 70 ms anteriores a cada sensor.
+    // Keep a minimum spacing between triggers to reduce cross-talk
+    // between sensors, without imposing the old 70 ms on each one.
     unsigned long elapsed = micros() - measurementStart;
     if (elapsed < SENSOR_PERIOD_US) {
       delayMicroseconds((unsigned int)(SENSOR_PERIOD_US - elapsed));
@@ -72,32 +82,36 @@ void loop()
 
 byte readUltrasonic(byte trigPin, byte echoPin)
 {
-  // Preparar TRIG.
+  // Settle TRIG low first.
   digitalWrite(trigPin, LOW);
   delayMicroseconds(3);
 
-  // Pulso de disparo.
+  // Trigger pulse.
   digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
 
-  // Esperar el pulso ECHO.
+  // Wait for the ECHO pulse.
   unsigned long duration =
     pulseIn(echoPin, HIGH, ECHO_TIMEOUT_US);
 
-  // No se recibió ningún eco.
+  // No echo came back.
   if (duration == 0) {
     return OUT_OF_RANGE_DISTANCE;
   }
 
-  // Convertir microsegundos a centímetros.
+  // Microseconds to centimetres.
   unsigned int distance = duration / 58UL;
 
   if (distance == 0) {
     return OUT_OF_RANGE_DISTANCE;
   }
 
-  // Todo lo que esté a 128 cm o más usa 128 como valor de saturación.
+  // Anything at 128 cm or beyond reports the out-of-range sentinel.
+  //
+  // Note this firmware has no validity mask, so the EV3 cannot tell a
+  // real 125 cm reading from a missing echo. That is the main reason the
+  // later firmwares exist.
   if (distance > MAX_DISTANCE) {
     distance = OUT_OF_RANGE_DISTANCE;
   }
@@ -105,7 +119,7 @@ byte readUltrasonic(byte trigPin, byte echoPin)
   return (byte)distance;
 }
 
-// El EV3 escribe qué sensor desea leer.
+// The EV3 writes which sensor it wants to read.
 void receiveEvent(int numberOfBytes)
 {
   if (Wire.available()) {
@@ -116,13 +130,13 @@ void receiveEvent(int numberOfBytes)
     }
   }
 
-  // Vaciar cualquier byte adicional.
+  // Drain any extra bytes.
   while (Wire.available()) {
     Wire.read();
   }
 }
 
-// El EV3 solicita un byte con la distancia.
+// The EV3 requests one byte with the distance.
 void requestEvent()
 {
   byte sensor = requestedSensor;
