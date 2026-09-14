@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""OPEN_ARD en ev3dev: prueba abierta, tres vueltas.
+"""Open challenge: three laps, walls only, no camera.
 
-Replica del programa `WRO OPEN ARD-UNO.mp` de Arath sobre el hardware de
-Renato. La estructura del lazo es la misma del original:
+The control loop each iteration:
 
-    actualizar IMU -> leer distancias -> motor -> volante ->
-    contar esquinas -> si van 12, avanzar 200 ms mas y frenar
+    read gyro -> read distances -> drive -> steer ->
+    count corners -> once 12 are counted, run on briefly and stop
 
-Para detener el robot en cualquier momento, el boton de retroceso.
+Twelve corners is three laps of a four-corner track.
+
+Press the brick's back button to stop the robot at any time.
 """
 
 import os
@@ -55,11 +56,11 @@ def main():
     print('offset del giroscopio: %.2f' % offset)
     print()
 
-    # Se imprimen los valores EFECTIVOS, leidos de config en este momento.
-    # Sin esto no hay forma de saber desde fuera si el config que se edito
-    # llego al ladrillo, ni cual de las dos velocidades esta en juego:
-    # open_ard usa VELOCIDAD y obs_ard usa VELOCIDAD_OBSTACULOS, y
-    # confundirlas parece que el cambio "no hizo nada".
+    # The EFFECTIVE values, read from config right now. Without this
+    # there is no way to tell from outside whether an edited config
+    # actually reached the brick, nor which of the two speeds is in play:
+    # open_ard uses VELOCIDAD and obs_ard uses VELOCIDAD_OBSTACULOS, and
+    # confusing them makes a change look like it "did nothing".
     print('--- valores en uso ---')
     print('VELOCIDAD      : %s   (VELOCIDAD, no VELOCIDAD_OBSTACULOS)'
           % config.VELOCIDAD)
@@ -81,23 +82,29 @@ def main():
         while not terminado and not boton.backspace:
             inicio_vuelta = time.time()
 
-            # 1. Giroscopio. Una sola lectura por vuelta de lazo.
+            # 1. Gyroscope. One reading per control loop.
             angulo = giro.actualizar()
 
-            # 2. Distancias y control. En el original el motor recibe la
-            #    velocidad de la vuelta anterior; se respeta ese orden.
+            # 2. Distances and control. The drive motor is given the
+            #    speed computed on the previous iteration, so that a
+            #    corner detected this iteration stops the robot without
+            #    one last burst of throttle.
             hub.actualizar()
             robot.avanzar(velocidad)
             robot.girar_por_error(hub.error_crudo())
 
-            # 3. Conteo de esquinas por giro acumulado. El umbral, el
-            #    reinicio del angulo y el descarte de esquinas falsas
-            #    estan dentro de es_esquina(); ver imu.py.
+            # 3. Corner counting by accumulated turn. The threshold, the
+            #    angle reset and the discarding of false corners all live
+            #    inside es_esquina(); see imu.py.
             if giro.es_esquina():
                 esquinas += 1
                 print('esquina %d' % esquinas)
 
-            # 4. Fin de las tres vueltas.
+            # 4. End of the three laps. The robot keeps going a little
+            #    longer so it finishes inside the start zone rather than
+            #    braking the moment it clears the last corner. It is
+            #    still following the walls during that run-on, not
+            #    driving blind.
             if esquinas >= config.ESQUINAS_META:
                 limite = time.time() + config.MS_EXTRA_AL_FINAL / 1000.0
                 while time.time() < limite:
@@ -112,8 +119,8 @@ def main():
 
             robot.indicar_vuelta(esquinas)
 
-            # El lazo se limita a PERIODO_LAZO; si el I2C ya tardo mas,
-            # no se duerme nada.
+            # The loop is capped at PERIODO_LAZO. If reading the sensors
+            # already took longer than that, nothing is slept.
             resto = config.PERIODO_LAZO - (time.time() - inicio_vuelta)
             if resto > 0:
                 time.sleep(resto)

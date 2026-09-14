@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-"""OBS_ARD en ev3dev: prueba de obstaculos, tres vueltas.
+"""Obstacle challenge: three laps, avoiding coloured pillars.
 
-Replica del programa `WRO OBS ARD-UNO.mp` de Arath. Es el mismo lazo de
-la prueba abierta mas la camara:
+The open challenge loop plus the camera:
 
-    si la HuskyLens ve un bloque -> el volante lo esquiva por el lado
-    que corresponde a su color
-    si no ve nada               -> el volante se centra entre paredes
-    con los ultrasonicos, igual que en la prueba abierta
+    HuskyLens sees a block -> steer around it, to the side its colour
+                              calls for
+    it sees nothing        -> centre between the walls using the
+                              ultrasonic sensors, as in the open run
 
-El conteo de esquinas y el final de carrera vienen del procedimiento
-`3 vueltas` del original y son identicos a los de open_ard.py.
+Corner counting and the end-of-race logic are identical to open_ard.py.
 
-Para detener el robot en cualquier momento, el boton de retroceso.
+Press the brick's back button to stop the robot at any time.
 """
 
 import os
@@ -65,11 +63,11 @@ def main():
     print('offset del giroscopio: %.2f' % offset)
     print()
 
-    # Valores EFECTIVOS, leidos de config en este momento. Sin esto no hay
-    # forma de saber si el config que se edito llego al ladrillo, ni cual
-    # de las dos velocidades esta en juego: obs_ard usa
-    # VELOCIDAD_OBSTACULOS y open_ard usa VELOCIDAD, y confundirlas parece
-    # que el cambio "no hizo nada".
+    # The EFFECTIVE values, read from config right now. Without this
+    # there is no way to tell whether an edited config actually reached
+    # the brick, nor which of the two speeds is in play: obs_ard uses
+    # VELOCIDAD_OBSTACULOS and open_ard uses VELOCIDAD, and confusing
+    # them makes a change look like it "did nothing".
     print('--- valores en uso ---')
     print('VELOCIDAD_OBSTACULOS  : %s   (no VELOCIDAD)'
           % config.VELOCIDAD_OBSTACULOS)
@@ -88,10 +86,10 @@ def main():
 
     esperar_boton(boton, sonido)
 
-    # El angulo se pone a cero al ARRANCAR, no al calibrar. Entre una cosa
-    # y otra puede pasar un rato largo esperando el boton, y cualquier
-    # deriva del giroscopio o empujon del robot en esa espera se sumaria a
-    # la primera esquina, adelantandola.
+    # The angle is zeroed at START, not at calibration time. A long wait
+    # can pass between the two while the button is pressed, and any gyro
+    # drift or nudge of the robot during that wait would add to the first
+    # corner and trigger it early.
     giro.reiniciar()
 
     esquinas = 0
@@ -107,18 +105,18 @@ def main():
         while not terminado and not boton.backspace:
             inicio_vuelta = time.time()
 
-            # 1. Sensores. Una lectura de cada uno por vuelta de lazo.
-            #    El original llama a `actualizar Huskylens` tres veces y a
-            #    `Actualizar Distancia` dos; es ruido de programacion por
-            #    bloques, no hace falta repetirlas.
+            # 1. Sensors. One reading of each per control loop. Reading
+            #    any of them twice in the same iteration buys nothing:
+            #    the values cannot change between two calls that are
+            #    microseconds apart.
             camara.actualizar()
             hub.actualizar()
             angulo = giro.actualizar()
 
-            # 2. Conteo de esquinas, del procedimiento `3 vueltas`.
-            #    es_esquina() descarta las falsas: esquivando un bloque el
-            #    volante va al tope y el giro acumulado pasa el umbral sin
-            #    que haya esquina de pista. Ver imu.py.
+            # 2. Corner counting. es_esquina() discards the false ones:
+            #    while avoiding a block the steering goes to full lock
+            #    and the accumulated turn passes the threshold without
+            #    there being a track corner at all. See imu.py.
             if giro.es_esquina():
                 esquinas += 1
                 print('esquina %d' % esquinas)
@@ -136,15 +134,16 @@ def main():
             else:
                 velocidad = config.VELOCIDAD_OBSTACULOS
 
-            # 3. Traccion.
+            # 3. Drive train.
             robot.avanzar(velocidad)
 
-            # 4. Volante: manda la camara si ve algo, si no los ultrasonicos.
-            #    Se usa la version con retencion: aguanta los parpadeos de
-            #    una o dos tramas y el alternado del adaptador cuando hay
-            #    dos bloques a la vista. Sin ella, cada fallo suelto
-            #    devolvia el mando al seguimiento de pared, que en ese
-            #    instante mandaba el volante al tope. Ver husky.py.
+            # 4. Steering: the camera commands it when it sees a block,
+            #    otherwise the ultrasonic sensors do. The held version is
+            #    used: it rides out one- or two-frame dropouts and the
+            #    adapter switching between two blocks in view. Without
+            #    it, every isolated dropout handed control back to wall
+            #    following, which at that instant sent the steering to
+            #    full lock. See husky.py.
             angulo_camara = camara.angulo_esquive_retenido()
 
             if angulo_camara is not None:
@@ -152,8 +151,8 @@ def main():
                 robot.girar(angulo_camara)
                 if camara.reteniendo:
                     retenidas += 1
-                    # Los datos actuales de la camara no describen la orden
-                    # que se esta ejecutando, asi que no se imprimen.
+                    # The camera's current readings do not describe the
+                    # command being executed, so they are not printed.
                     modo = ('CAM* reteniendo %+5.1f  pasa por la %s'
                             % (angulo_camara,
                                'DERECHA' if angulo_camara > 0
@@ -178,10 +177,10 @@ def main():
             if (config.OBS_TELEMETRIA
                     and ahora - ultimo_aviso >= 1.0 / config.OBS_TELEMETRIA_HZ):
                 ultimo_aviso = ahora
-                # El angulo del giroscopio va en la telemetria porque es lo
-                # unico que deja ver por que se conto (o no se conto) una
-                # esquina: sin el, un conteo raro no se puede diagnosticar
-                # despues de la carrera.
+                # The gyro angle goes into the telemetry because it is
+                # the only thing that shows why a corner was counted, or
+                # was not: without it, an odd count cannot be diagnosed
+                # once the race is over.
                 print('%5.1f  esq=%2d  giro=%+6.1f  %s'
                       % (ahora - inicio, esquinas, angulo, modo))
 
