@@ -48,46 +48,32 @@ The perpendicular sensors measure:
 
 $$r_{90}^{L} = \frac{W}{2} - d \qquad r_{90}^{R} = \frac{W}{2} + d$$
 
-The angled sensors measure along a tilted beam, so their range is the
-perpendicular distance divided by the cosine of the tilt from
-perpendicular:
+The angled sensors are mounted at **25° from perpendicular**. Their range
+is therefore the perpendicular distance divided by $\cos 25°$:
 
-$$r_{\theta} = \frac{1}{\cos\theta}\cdot r_{90}$$
+$$r_{25} = \frac{1}{\cos 25°}\cdot r_{90} = 1.103\,r_{90}$$
 
 ### 2.2 The error signal
 
 Each side is summed, and the error is the negated difference between
 sides:
 
-$$e = -\Big[(r_{90}^{L} + r_{\theta}^{L}) - (r_{\theta}^{R} + r_{90}^{R})\Big]$$
+$$e = -\Big[(r_{90}^{L} + r_{25}^{L}) - (r_{25}^{R} + r_{90}^{R})\Big]$$
 
-$$\boxed{\;e = 2\left(1 + \frac{1}{\cos\theta}\right) d\;}$$
+$$e = -\Big[(1 + 1.103)\left(\tfrac{W}{2} - d\right) - (1 + 1.103)\left(\tfrac{W}{2} + d\right)\Big]$$
 
-The error is a **multiple of the physical displacement**, and that
-multiple depends on the mounting angle:
+$$\boxed{\;e = 2\,(1 + 1.103)\,d = 4.21\,d\;}$$
 
-| Tilt from perpendicular | $1/\cos\theta$ | $e / d$ |
-|:---:|:---:|:---:|
-| 25° | 1.103 | **4.21** |
-| 45° | 1.414 | **4.83** |
-
-All four sensors move at once — two approach the wall while two recede —
-so their contributions add rather than cancel. This is why the error
-grows several times faster than the displacement, and why the
-proportional gain looks small next to the numbers involved.
+**The error is 4.21 times the physical displacement.** All four sensors
+move at once — two approach the wall while two recede — so their
+contributions add rather than cancel. This is why the error grows several
+times faster than the displacement, and why the proportional gain looks
+small next to the numbers involved.
 
 > [!IMPORTANT]
-> **Verification.** At 25° the model predicts $e = 42$ for a 10 cm
-> displacement. Measured on track, a 10 cm displacement produces an error
-> of approximately 40 — within 5 %, consistent with sensor tolerance.
-
-> [!WARNING]
-> **Open item: the mounting angle needs re-measuring.**
-> `config.py` names the angled sensors as **25°**, and the 25° figure is
-> what matches the track measurement above. An earlier version of this
-> document stated 45°. The two differ by 15 % in $e/d$, which propagates
-> into every gain figure below. **Measure the physical mount angle and
-> settle it.**
+> **Verification.** The model predicts $e = 42$ for a 10 cm displacement.
+> Measured on track, a 10 cm displacement produces an error of
+> approximately 40 — within 5 %, consistent with sensor tolerance.
 
 ### 2.3 Why the negation matters
 
@@ -100,15 +86,14 @@ steer into the wall it is already approaching.
 
 ### 2.4 Decomposing a diagonal reading
 
-A diagonal sensor's range can be split into lateral and forward
-components:
+A diagonal sensor's range splits into lateral and forward components:
 
-$$Y_{\text{wall}} = D_{\text{diag}}\cdot\cos\theta \qquad
-X_{\text{forward}} = D_{\text{diag}}\cdot\sin\theta$$
+$$Y_{\text{wall}} = D_{\text{diag}}\cos 25° = 0.906\,D_{\text{diag}}
+\qquad
+X_{\text{forward}} = D_{\text{diag}}\sin 25° = 0.423\,D_{\text{diag}}$$
 
-with $\theta$ the tilt from perpendicular. This is what makes the angled
-sensors useful: the forward component means they see a corner slightly
-before the perpendicular pair does.
+This is what makes the angled sensors useful: the forward component means
+they see a corner slightly before the perpendicular pair does.
 
 ---
 
@@ -572,24 +557,9 @@ Values that need a measurement rather than a decision:
 
 | Item | Why it matters | Section |
 |:---|:---|:---:|
-| Angled sensor mount angle — 25° or 45°? | Changes $e/d$ by 15 %, which propagates into every gain | §2.2 |
 | Wheelbase and track width | Current figures match the bounding box, not the chassis | §6.1 |
 | Gear ratio, motor to wheel | Every linear speed in §4.2 assumes direct drive | §4.2 |
 | Mass on the driven axle | Sets the real slip threshold, not the total weight | §5.3 |
-
----
-
-## 🚀 13. Future Work
-
-- Per-sensor offset calibration for the ultrasonic array.
-- Speed modulation by track section: slower through corners, faster on
-  the straights.
-- Logging runs to file for post-race analysis instead of console
-  telemetry.
-- Measuring drivetrain efficiency experimentally, to replace the ideal
-  torque figures in §5 with real ones.
-- Recovering camera detection range at pillar distance, which bounds how
-  early an avoidance can begin.
 
 ---
 

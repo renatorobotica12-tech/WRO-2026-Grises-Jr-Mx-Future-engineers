@@ -798,7 +798,7 @@ Compared with individual wiring, the PCB provides:
 <div align="center">
 
 
-Software Architecture • Calibration Systems • Ultrasonic Sensor Fusion • PID Controller • Safety Logic • Speed Control • Engineering Decisions • Future Improvements • Repository Structure
+Software Architecture • Sensor Fusion • Wall Centring • Camera Avoidance • Steering Calibration • Corner Counting • Engineering Decisions
 </div>
 # 💻 Software Architecture
 
@@ -1095,16 +1095,6 @@ Corners arriving closer together than 1.5 seconds are now discarded. The
 angle is still reset, because that turn physically happened and carrying
 it forward would trigger the next corner early. Each run reports how many
 false corners were rejected.
-
-# 🚀 Future Improvements
-
-- Per-sensor offset calibration for the ultrasonic array.
-- Speed modulation by track section: slower through corners, faster on
-  the straights.
-- Logging runs to file for post-race analysis instead of console
-  telemetry.
-- Recovering the camera's detection range at pillar distance, which
-  limits how early an avoidance can begin.
 
 ---
 
