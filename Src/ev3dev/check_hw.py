@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
-"""Diagnostico del hardware antes de correr open_ard.py.
+"""Hardware diagnostics, to run before any race program.
 
-Resuelve en el robot las tres cosas que no se pueden decidir desde la PC:
+This exists because a handful of values cannot be decided at a desk.
+They depend on how this particular robot is wired and assembled, and
+guessing them wrong produces failures that look like software bugs:
 
-  1. que indice de la trama corresponde a cada ultrasonico;
-  2. cuanto vale IMU_ESCALA y con que signo;
-  3. hacia que lado gira el volante con un angulo positivo.
+  1. which frame index belongs to which ultrasonic sensor;
+  2. what IMU_ESCALA is, and with which sign;
+  3. which way the steering turns for a positive angle;
+  4. how far the steering actually travels, stop to stop.
 
-Uso:
-    python3 check_hw.py puertos     que ve ev3dev en cada puerto
-    python3 check_hw.py serie       lineas crudas del Nano por USB
-    python3 check_hw.py ultra       trama interpretada de los ultrasonicos
-    python3 check_hw.py mapear      que indice es cada ultrasonico
-    python3 check_hw.py husky       valores crudos de la HuskyLens
-    python3 check_hw.py imu         lectura cruda del giroscopio
-    python3 check_hw.py escala      calcula IMU_ESCALA
-    python3 check_hw.py lazo        ensayo general, motores apagados
-    python3 check_hw.py alimentacion enciende el puerto D para el Nano
-    python3 check_hw.py motores     confirma cual motor es cual
-    python3 check_hw.py topes       mide el recorrido de la direccion
-    python3 check_hw.py volante     sentido del volante
-    python3 check_hw.py parar       apaga motores y alimentacion
+Every command here either only reads, or says plainly that it moves the
+robot.
+
+Usage:
+    python3 check_hw.py puertos     what ev3dev sees on each port
+    python3 check_hw.py serie       raw lines from the Nano over USB
+    python3 check_hw.py ultra       decoded ultrasonic frame, live
+    python3 check_hw.py mapear      which index is which sensor
+    python3 check_hw.py husky       raw HuskyLens values
+    python3 check_hw.py imu         raw gyroscope reading
+    python3 check_hw.py escala      compute IMU_ESCALA
+    python3 check_hw.py lazo        full control loop, motors off
+    python3 check_hw.py alimentacion power port D for the Nano
+    python3 check_hw.py motores     confirm which motor is which
+    python3 check_hw.py topes       measure the steering travel
+    python3 check_hw.py volante     steering direction
+    python3 check_hw.py parar       stop motors and cut power
 """
 
 import glob
@@ -34,11 +40,14 @@ from wro import config, ports
 
 
 def parar():
-    """Apaga todo: traccion, volante y la alimentacion del Nano.
+    """Shut everything down: drive, steering and the Nano's power.
 
-    Para cuando algo quedo encendido porque un programa murio sin pasar
-    por su `finally` (se cerro la terminal, se corto el ssh). Es seguro
-    correrlo en cualquier momento.
+    For when something was left running because a program died without
+    reaching its `finally` -- terminal closed, ssh dropped. Safe to run
+    at any time.
+
+    Worth knowing: a program killed mid-run can leave port D powering the
+    Nano indefinitely, which quietly drains the battery.
     """
     for ruta in sorted(glob.glob('/sys/class/tacho-motor/motor*')):
         with open(os.path.join(ruta, 'address')) as f:
@@ -101,10 +110,10 @@ def puertos():
 
 
 def serie():
-    """Lineas crudas del Nano, tal como salen por USB.
+    """Raw lines from the Nano, exactly as they arrive over USB.
 
-    Sirve para separar un problema de cable de uno de formato. Deberian
-    verse lineas como: U 34 51 125 47 30 27 91 12
+    Separates a cabling problem from a format problem. You should see
+    lines like: U 34 51 125 47 30 27 91 12
     """
     import serial
     from wro.ultrasonics import HubSerial
@@ -124,16 +133,22 @@ def serie():
 
 
 def husky():
-    """Valores crudos de la HuskyLens por el adaptador OFDL.
+    """Raw HuskyLens values through the OFDL adapter.
 
-    Confirma tres cosas:
+    Settles three things:
 
-      - que modo hay que poner en HUSKY_MODO (ev3dev los llama MODE0,
-        MODE1... porque no conoce este sensor);
-      - en que rango vienen X e Y, para ajustar HUSKY_CENTRO_X / _Y;
-      - que ID le toca a cada color, para HUSKY_ID_VERDE y HUSKY_ID_ROJO.
+      - which mode to put in HUSKY_MODO;
+      - what range X and Y actually arrive in, to set HUSKY_CENTRO_X/_Y
+        and to check whether the axes need inverting;
+      - which ID belongs to which colour, for HUSKY_ID_VERDE and
+        HUSKY_ID_ROJO.
 
-    Pongan un bloque de cada color delante de la camara y anoten el ID.
+    Hold one block of each colour in front of the camera and note the ID.
+    This is the only way to settle it: a swapped colour ID produces
+    exactly the same symptom as reversed target signs.
+
+    Shows the raw angle, without the hold-over filter, so a flickering
+    camera is visible rather than smoothed away.
     """
     from wro.husky import HuskyLens
 
@@ -167,10 +182,13 @@ def husky():
 
 
 def ultra():
-    """Muestra la trama en vivo.
+    """Show the decoded frame live.
 
-    Tape con la mano un sensor a la vez y anote que columna cambia. Con
-    eso se llenan IDX_IZQ, IDX_FRONTAL e IDX_DER en config.py.
+    Cover one sensor at a time with your hand and note which column
+    changes. That fills in IDX_IZQ, IDX_FRONTAL and IDX_DER in config.py.
+
+    Both the raw and the filtered columns are shown, so it is visible
+    when the filter is substituting a reading rather than reporting one.
     """
     from wro.ultrasonics import crear_hub
 
@@ -189,17 +207,17 @@ def ultra():
         print('tramas malas: %d de %d' % (hub.tramas_malas, hub.tramas_leidas))
         print('sustituciones por sensor: %s' % hub.sin_eco)
     finally:
-        # Sin esto, un Ctrl-C deja el puerto D alimentando al Nano para
-        # siempre y se vacia la bateria.
+        # Without this, a Ctrl-C leaves port D powering the Nano forever
+        # and the battery drains.
         hub.cerrar()
 
 
 def mapear():
-    """Averigua que indice de la trama es cada ultrasonico.
+    """Work out which frame index belongs to which ultrasonic sensor.
 
-    Toma una linea base con todo despejado y despues pide tapar uno por
-    uno. El indice que mas cambie es el de ese sensor. Al final imprime
-    las lineas ya listas para pegar en wro/config.py.
+    Takes a baseline with everything clear, then asks for one sensor to
+    be covered at a time. Prints the resulting IDX_ lines ready to paste
+    into wro/config.py.
     """
     from wro.ultrasonics import crear_hub
 
@@ -207,23 +225,22 @@ def mapear():
     try:
         _mapear(hub)
     finally:
-        # Sin esto, salir a medias deja el puerto D alimentando al Nano.
+        # Without this, quitting halfway leaves port D powering the Nano.
         hub.cerrar()
 
 
 def _mapear(hub):
-    CERCA = 30           # cm: por debajo de esto se considera "tapado"
+    CERCA = 30           # cm: below this a sensor counts as covered
 
     def mediana(valores):
         ordenados = sorted(valores)
         return ordenados[len(ordenados) // 2]
 
     def medir(segundos=2.0):
-        """Mediana de cada sensor, no promedio.
+        """Median per sensor, not mean.
 
-        Estos ultrasonicos sueltan lecturas de 125 (fuera de rango) de vez
-        en cuando, y un solo 125 mueve el promedio 20 cm. La mediana los
-        ignora.
+        These sensors emit an occasional 125 (out of range), and one
+        such value shifts a mean by 20 cm. The median ignores them.
         """
         muestras = [[] for _ in range(5)]
         limite = time.time() + segundos
@@ -257,10 +274,11 @@ def _mapear(hub):
                   % nombre)
             actual = medir()
 
-            # Un sensor tapado tiene que cumplir DOS cosas: leer cerca en
-            # terminos absolutos, y haber bajado respecto de su base. Solo
-            # "el que mas cambio" se lo come el ruido, que en estos
-            # sensores llega a 35 cm sin que nadie los toque.
+            # A covered sensor has to satisfy TWO conditions: read close
+            # in absolute terms, AND have dropped relative to its own
+            # baseline. "Whichever changed most" on its own gets swamped
+            # by noise, which on these sensors reaches 35 cm with nobody
+            # touching them.
             usados = [h[0] for h in hallados]
             puntajes = []
             for i in range(5):
@@ -301,7 +319,7 @@ def _mapear(hub):
 
 
 def imu():
-    """Lectura cruda del giroscopio, sin escala ni offset."""
+    """Raw gyroscope reading, with no scaling and no offset applied."""
     from wro.imu import Giroscopio
 
     giro = Giroscopio(escala=1.0)
@@ -316,15 +334,16 @@ def imu():
 
 
 def escala():
-    """Averigua IMU_EJE e IMU_ESCALA de una sola vez.
+    """Work out IMU_EJE and IMU_ESCALA in one go.
 
-    Integra los TRES ejes del giroscopio mientras usted gira el robot un
-    angulo conocido. El eje vertical del montaje es el que acumula mucho;
-    los otros dos solo recogen bamboleo. Comparando lo acumulado con el
-    angulo real sale la escala, con su signo.
+    Integrates ALL THREE gyroscope axes while the robot is turned
+    through a known angle by hand. The vertical axis of this build is
+    the one that accumulates a lot; the other two only pick up wobble.
+    Comparing what accumulated against the real angle gives the scale,
+    with its sign.
 
-    Se gira una vuelta completa y no 90 grados porque el error de empezar
-    y parar a ojo pesa cuatro veces menos.
+    A full turn is used rather than 90 degrees because the error of
+    starting and stopping by eye then counts for four times less.
 
         python3 check_hw.py escala          una vuelta, 360 grados
         python3 check_hw.py escala 90       si prefieren un cuarto
@@ -412,20 +431,21 @@ def escala():
 
 
 def lazo():
-    """Corre el lazo de control completo SIN mover los motores.
+    """Run the full control loop WITHOUT moving the motors.
 
-    Es el ensayo general: lee los tres sensores, calcula el error, el
-    angulo de volante y las esquinas exactamente como lo hara open_ard.py
-    y obs_ard.py, pero no manda nada a la traccion ni al volante.
+    The dress rehearsal: reads all three sensors, computes the error,
+    the steering angle and the corner count exactly as open_ard.py and
+    obs_ard.py will, but sends nothing to the drive or the steering.
 
-    Sirve para dos cosas que solo se ven con todo funcionando junto:
+    Useful for two things that only show up with everything running
+    together:
 
-      - cuantas vueltas de lazo por segundo salen de verdad, que es lo
-        que decide si el robot corrige a tiempo;
-      - si los signos cierran. Empuje el robot a mano hacia una pared y
-        mire que el angulo salga hacia el lado contrario.
+      - how many control loops per second actually happen, which is what
+        decides whether the robot corrects in time;
+      - whether the signs are consistent. Push the robot by hand towards
+        a wall and check the angle comes out towards the opposite side.
 
-    Ctrl-C para salir.
+    Ctrl-C to exit.
     """
     from wro.husky import HuskyLens
     from wro.imu import Giroscopio
@@ -508,11 +528,11 @@ def lazo():
 
 
 def motores():
-    """Confirma cual motor es cual, moviendo uno a la vez.
+    """Confirm which motor is which, by moving one at a time.
 
-    Los movimientos son de 15 grados, dentro del recorrido util de la
-    direccion, asi que no fuerzan los topes. Aun asi conviene levantar el
-    robot o ponerlo sobre un soporte antes de correrlo.
+    The movements are 15 degrees, within the usable steering travel, so
+    they do not strain the stops. Even so, lift the robot or put it on a
+    stand before running this.
     """
     from ev3dev2.motor import Motor
 
@@ -551,10 +571,10 @@ def motores():
 
 
 def alimentacion():
-    """Enciende el puerto D como fuente de corriente para el Nano.
+    """Power port D as a current source for the Nano.
 
-    Deja la salida al 100 %, que es continua. Con menos seria una onda
-    cuadrada y no sirve para alimentar electronica.
+    Leaves the output at 100 %, which is continuous. Below that it would
+    be a square wave, which is no use for powering electronics.
     """
     from wro.power import AlimentacionNano
 
@@ -580,14 +600,14 @@ def alimentacion():
 
 
 def topes():
-    """Mide el recorrido real de la direccion, tope a tope.
+    """Measure the real steering travel, stop to stop.
 
-    Delega en Robot.medir_topes(), la MISMA rutina que usa el autocentrado
-    del arranque. Antes habia dos copias de esta logica y se les olvido
-    copiar el escalado de potencia a una de ellas: `topes` medía 111
-    grados y el autocentrado 11, con el mismo mecanismo.
+    Delegates to Robot.medir_topes(), the SAME routine the start-up
+    auto-centring uses. There used to be two copies of this logic and one
+    of them never got the power-ladder fix: `topes` measured 111 degrees
+    and the auto-centring measured 11, on the same mechanism.
 
-    Levante el robot antes de correrlo.
+    Lift the robot before running this.
     """
     from wro.robot import Robot
 
@@ -624,7 +644,7 @@ def topes():
     robot.volante.stop(stop_action='coast')
 
     libre = robot.recorrido_libre
-    sugerido = (libre / 2.0) * 0.85           # 15 % de margen a los topes
+    sugerido = (libre / 2.0) * 0.85           # 15 % margin off the stops
 
     print()
     print('tope bajo        : %+d grados' % bajo)
@@ -647,7 +667,10 @@ def topes():
 
 
 def volante():
-    """Mueve el volante a los dos topes logicos para ver el sentido."""
+    """Drive the steering to both logical limits to check its direction.
+
+    Moves the steering, but not the drive train, so the robot stays put.
+    """
     from wro.robot import Robot
 
     robot = Robot()
