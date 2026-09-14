@@ -1,0 +1,24 @@
+# Finales de linea.
+#
+# El codigo de Src/ev3dev corre sobre Linux en el ladrillo EV3, y los
+# .ino se compilan para el Arduino Nano. Si un archivo .py llega al EV3
+# con finales de linea CRLF de Windows, el sistema falla al arrancarlo
+# con "bad interpreter" y el error no dice nada sobre finales de linea.
+#
+# Forzando eol=lf, cualquiera puede clonar este repositorio desde
+# Windows y los archivos siguen siendo validos en el robot.
+* text=auto eol=lf
+
+# Binarios: git no debe tocarlos ni intentar fusionarlos.
+*.ev3   binary
+*.ev3b  binary
+*.mp     binary
+*.pdf   binary
+*.zip   binary
+*.mp4   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.stl   binary
+*.f3d   binary
