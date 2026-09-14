@@ -1,8 +1,8 @@
-"""Manejo de los puertos de sensores del EV3 en modo I2C.
+"""Driving the EV3 sensor ports in I2C mode.
 
-El EV3 solo detecta solo los sensores I2C tipo NXT que estan en la
-direccion 0x01. Ni el Arduino Nano (0x08) ni el AbsoluteIMU (0x11) lo
-estan, asi que hay que configurar el puerto a mano.
+The EV3 only auto-detects NXT-style I2C sensors that sit at address
+0x01. Neither the Arduino Nano (0x08) nor the AbsoluteIMU (0x11) does,
+so the port has to be configured by hand.
 """
 
 import glob
@@ -11,11 +11,11 @@ import time
 
 
 def buscar_puerto(direccion_puerto):
-    """Devuelve la ruta /sys/class/lego-port/portN del puerto pedido.
+    """Return the /sys/class/lego-port/portN path for a port.
 
-    `direccion_puerto` es la direccion de ev3dev, por ejemplo
-    'ev3-ports:in4'. Se acepta tambien la forma corta 'in4' u 'outD',
-    que es la que usan las clases de motores de ev3dev2.
+    `direccion_puerto` is the ev3dev address, for example
+    'ev3-ports:in4'. The short forms 'in4' and 'outD' are also accepted,
+    since those are what the ev3dev2 motor classes use.
     """
     if not direccion_puerto.startswith('ev3-ports:'):
         direccion_puerto = 'ev3-ports:' + direccion_puerto
@@ -42,11 +42,11 @@ def modo_actual(direccion_puerto):
 
 
 def poner_modo(direccion_puerto, modo):
-    """Fija el modo de un puerto si no lo tiene ya.
+    """Set a port's mode if it is not already in it.
 
-    Se usa para los puertos de salida: `dc-motor` para alimentar el Nano
-    desde el puerto D, ya que en `auto` el ladrillo no detecta un
-    dispositivo pasivo y el puerto queda en estado `error`.
+    Used for the output ports: `dc-motor` to power the Nano from port D,
+    since in `auto` the brick does not detect a passive device and the
+    port ends up in the `error` state.
     """
     ruta = buscar_puerto(direccion_puerto)
     if modo_actual(direccion_puerto) != modo:
@@ -56,10 +56,10 @@ def poner_modo(direccion_puerto, modo):
 
 
 def poner_other_i2c(direccion_puerto):
-    """Deja el puerto listo para hablar I2C crudo.
+    """Put a port into raw I2C mode.
 
-    Se usa para el Arduino Nano, que no sigue el protocolo NXT.
-    Despues de esto aparece /dev/i2c-inN.
+    Used for the Arduino Nano, which does not follow the NXT protocol.
+    After this, /dev/i2c-inN appears.
     """
     ruta = buscar_puerto(direccion_puerto)
     if modo_actual(direccion_puerto) != 'other-i2c':
@@ -69,9 +69,9 @@ def poner_other_i2c(direccion_puerto):
 
 
 def poner_nxt_i2c(direccion_puerto, driver, direccion_i2c):
-    """Carga un driver de ev3dev sobre un sensor I2C en el puerto.
+    """Load an ev3dev driver onto an I2C sensor on a port.
 
-    Equivale a:
+    Equivalent to:
         echo nxt-i2c > .../mode
         echo "ms-absolute-imu 0x11" > .../set_device
     """
@@ -85,7 +85,7 @@ def poner_nxt_i2c(direccion_puerto, driver, direccion_i2c):
 
 
 def liberar(direccion_puerto):
-    """Devuelve el puerto a deteccion automatica."""
+    """Return a port to automatic detection."""
     ruta = buscar_puerto(direccion_puerto)
     try:
         _escribir(ruta, 'mode', 'auto')

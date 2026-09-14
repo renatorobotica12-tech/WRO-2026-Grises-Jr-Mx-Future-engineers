@@ -1,10 +1,8 @@
-"""Traccion y volante.
+"""Drive train and steering.
 
-El robot de Arath dirige con un servo de hobby en el pin 8, con angulos
-de 70 a 110 y centro en 90. El robot de Renato dirige con un motor
-mediano del EV3. Aqui el motor mediano se maneja como si fuera un servo:
-se le da una consigna de posicion absoluta en grados respecto del centro
-y el control de posicion del propio EV3 se encarga del resto.
+Steering is an EV3 medium motor driven as if it were a servo: it is
+given an absolute position command in degrees relative to centre, and
+the EV3's own position controller does the rest.
 """
 
 from ev3dev2.motor import Motor
@@ -15,12 +13,12 @@ from .util import clamp_abs, constrain
 
 
 class Robot(object):
-    """Se usa `Motor` y no `LargeMotor` / `MediumMotor` a proposito.
+    """`Motor` is used rather than `LargeMotor` / `MediumMotor` on purpose.
 
-    Esas dos clases filtran por `driver_name`, asi que `LargeMotor` revienta
-    con un motor mediano. En este robot los dos motores son medianos, y de
-    todos modos nada de lo que hace este archivo depende del tamano: la
-    traccion va por `duty_cycle_sp` de 0 a 100 y el volante por posicion.
+    Those two classes filter by `driver_name`, so `LargeMotor` throws on
+    a medium motor. Both motors on this robot are medium ones, and in any
+    case nothing in this file depends on motor size: the drive train is
+    commanded 0 to 100 and the steering by position.
     """
 
     def __init__(self):
@@ -41,27 +39,27 @@ class Robot(object):
         self._destino_volante = None
 
     # ----------------------------------------------------------------
-    # Volante
+    # Steering
     # ----------------------------------------------------------------
 
     def preparar_volante(self):
-        """Equivale al bloque `reinicio_volante` de EV3-G.
+        """Establish the steering centre before a run.
 
-        Con VOLANTE_AUTOCENTRAR en False se da por hecho que el volante
-        quedo recto al encender, y ese punto pasa a ser el cero. Con True
-        se buscan los dos topes y el cero es el punto medio, que es fiable
-        aunque el robot se haya guardado con las ruedas torcidas.
+        With VOLANTE_AUTOCENTRAR False, the steering is assumed to have
+        been straight at power-on and that point becomes zero. With True,
+        both mechanical stops are found and zero is the midpoint, which
+        is reliable even if the robot was stored with the wheels turned.
         """
         if config.VOLANTE_AUTOCENTRAR:
             self.centro = self._buscar_centro()
 
-            # Aviso, no error: un recorrido corto puede significar que la
-            # busqueda no encontro los topes y el centro no vale nada,
-            # pero tambien puede ser un falso positivo. Se compara contra
-            # el recorrido FORZADO, que es el unico que va siempre de
-            # tope a tope; el libre se queda corto cuando el volante
-            # arranca ya pegado a un tope, porque entonces el primer
-            # empujon de ese lado recorre poco.
+            # A warning, not an error. A short travel can mean the search
+            # never reached the stops and the centre is meaningless, but
+            # it can also be a false alarm. The comparison uses the
+            # FORCED travel, the only one that always goes stop to stop:
+            # the free travel comes out short when the steering starts
+            # already against a stop, because the first push on that side
+            # then covers very little.
             if self.recorrido < 2 * config.VOLANTE_LIMITE:
                 print('AVISO: el volante solo recorrio %d grados y '
                       'VOLANTE_LIMITE es %.1f. Si el robot va torcido, '
@@ -75,31 +73,31 @@ class Robot(object):
         self.girar(0)
 
     def empujar_a_tope(self, signo, avisar=None):
-        """Empuja el volante contra un tope y devuelve (posicion, se_movio).
+        """Push the steering against one stop; return (position, moved).
 
-        Se recorre SIEMPRE toda la escalera de potencias, de menor a
-        mayor, quedandose con la posicion final. Es la parte que importa:
-        que el volante deje de moverse a una potencia baja NO significa
-        que haya llegado al tope, solo que esa potencia ya no lo empuja
-        mas. Medido en este robot:
+        The whole ladder of duty cycles is ALWAYS walked, lowest to
+        highest, keeping the final position. That is the part that
+        matters: the steering ceasing to move at a low duty cycle does
+        NOT mean it reached the stop, only that this much power no longer
+        pushes it further. Measured on this robot:
 
-            25 %  no se mueve nada
-            40 %  avanza 28 grados y se clava a mitad de camino
-            60 %  llega a 119
-            100 % llega a 125          <- este es el tope de verdad
+            25 %  does not move at all
+            40 %  advances 28 degrees and jams halfway
+            60 %  reaches 119
+            100 % reaches 125          <- this is the real stop
 
-        Una version anterior cortaba en cuanto veia movimiento y aceptaba
-        el 28 como tope, con lo que medía 26 grados de recorrido en vez
-        de 111 y el centro salia desplazado casi 50 grados.
+        An earlier version stopped as soon as it saw movement and
+        accepted the 28 as the stop, which measured 26 degrees of travel
+        instead of 111 and put the centre almost 50 degrees off.
 
-        El cronometro de "esta quieto" solo corre DESPUES de haber visto
-        moverse el volante: si empieza antes, la friccion estatica de los
-        primeros milisegundos se confunde con un tope.
+        The "not moving" timer only starts AFTER the steering has been
+        seen to move. Starting it earlier confuses the static friction of
+        the first few milliseconds with a mechanical stop.
         """
         import time
 
         UMBRAL = 1
-        QUIETO = 0.3          # corto, para no dejarlo clavado mas de la cuenta
+        QUIETO = 0.3          # short, so it is not left straining
         ARRANQUE = 0.6
         LIMITE = 4.0
 
@@ -141,30 +139,31 @@ class Robot(object):
         return final, libre, abs(final - partida) >= UMBRAL
 
     def medir_topes(self, avisar=None):
-        """Busca los dos topes mecanicos y deja self.topes y self.recorrido.
+        """Find both mechanical stops; set self.topes and self.recorrido.
 
-        Las dos posiciones se miden desde el MISMO origen: el `reset()`
-        va una sola vez, antes de empezar. Reiniciando el encoder entre
-        un tope y otro, el punto medio no significaria nada.
+        Both positions are measured from the SAME origin: `reset()` runs
+        once, before starting. Resetting the encoder between one stop and
+        the other would make the midpoint meaningless.
 
-        Deja dos recorridos, y la diferencia entre ellos importa:
+        Two travels are recorded, and the difference between them
+        matters:
 
-          self.recorrido        tope a tope empujando al maximo
-          self.recorrido_libre  hasta donde llega con la potencia minima
+          self.recorrido        stop to stop, pushing at full power
+          self.recorrido_libre  how far it gets at the lowest power
 
-        Medido en este robot: 157 forzado contra 111 libre. Los 46 de
-        diferencia son el mecanismo flexando contra los topes, no
-        direccion utilizable. VOLANTE_LIMITE tiene que salir del libre;
-        del forzado saldria un limite que hace pelear al volante con los
-        topes en cada correccion.
+        Measured on this robot: 157 forced against 111 free. Those 46
+        degrees of difference are the mechanism flexing against the
+        stops, not usable steering. VOLANTE_LIMITE has to come from the
+        free travel; taking it from the forced one produces a limit that
+        makes the steering fight the stops on every correction.
 
-        El centro se toma del recorrido forzado, que es el mas simetrico:
-        los dos extremos se alcanzan del mismo modo, mientras que los
-        libres se alcanzan uno desde el centro y otro desde un tope.
+        The centre comes from the forced travel, which is the more
+        symmetric of the two: both ends are reached the same way, whereas
+        the free ends are reached one from the centre and one from a stop.
 
-        Devuelve el punto medio. Lo usan tanto el autocentrado del
-        arranque como `check_hw.py topes`: una sola implementacion, para
-        que no puedan volver a discrepar.
+        Returns the midpoint. Used both by the start-up auto-centring and
+        by `check_hw.py topes`, so there is a single implementation and
+        the two cannot drift apart again.
         """
         self.volante.reset()
         self.volante.stop_action = 'coast'
@@ -172,16 +171,16 @@ class Robot(object):
         extremo_a, libre_a, movio_a = self.empujar_a_tope(+1, avisar)
         extremo_b, libre_b, movio_b = self.empujar_a_tope(-1, avisar)
 
-        # No se asume que potencia positiva suba la posicion: en este
-        # robot la hace bajar. Los extremos se ordenan por su valor.
+        # Do not assume positive power raises the position: on this robot
+        # it lowers it. The ends are ordered by value instead.
         self.topes = (min(extremo_a, extremo_b), max(extremo_a, extremo_b))
         self.recorrido = self.topes[1] - self.topes[0]
         self.recorrido_libre = abs(libre_a - libre_b)
         self.movio = (movio_a, movio_b)
 
         self.volante.stop_action = 'hold'
-        # El volante se movio con run_direct, asi que la consigna de
-        # posicion que hubiera quedado guardada ya no vale.
+        # The steering was driven with run_direct, so any stored position
+        # command is no longer valid.
         self._destino_volante = None
         return int(round((extremo_a + extremo_b) / 2.0))
 
@@ -189,16 +188,16 @@ class Robot(object):
         return self.medir_topes()
 
     def resumen_topes(self):
-        """Lo que midio el autocentrado, listo para imprimir.
+        """What the auto-centring measured, ready to print.
 
-        Se llama despues de preparar_volante(). Esta aqui y no copiado en
-        cada programa para que los tres reporten lo mismo, y para que
-        `check_hw.py topes` y el arranque de una carrera no puedan
-        discrepar en lo que significan estos numeros.
+        Called after preparar_volante(). It lives here rather than being
+        copied into each program so all three report the same thing, and
+        so `check_hw.py topes` and the start of a race cannot disagree
+        about what these numbers mean.
 
-        Conviene mirarlo en cada corrida: si el mecanismo se afloja o el
-        motor patina, estos valores cambian antes de que el sintoma se
-        note en pista.
+        Worth reading on every run: if the mechanism works loose or the
+        motor slips, these values change before the symptom shows up on
+        track.
         """
         if not config.VOLANTE_AUTOCENTRAR:
             return 'volante: sin autocentrar, el cero es donde arranco'
@@ -222,25 +221,26 @@ class Robot(object):
         ])
 
     def girar(self, grados):
-        """Consigna del volante en grados respecto del centro.
+        """Steering command, in degrees relative to centre.
 
-        `grados` positivo o negativo dentro de +-VOLANTE_LIMITE.
-        Reemplaza a Volante(%n) de Arduino y a PID_R_20 de EV3-G.
+        Positive turns right, negative left. The value is clamped to the
+        per-side limits before anything else happens.
 
-        La consigna solo se escribe cuando CAMBIA, igual que en avanzar().
-        `run_to_abs_pos()` es una orden que persiste: el motor sigue yendo
-        a esa posicion sin que haya que repetirla. Reemitirla en cada
-        vuelta de lazo reiniciaba el controlador de posicion del EV3 cada
-        22 ms, con lo que la rampa no llegaba a completarse nunca y el
-        volante respondia a tirones en vez de ir limpio a la consigna.
+        The command is only written when it CHANGES, same as in
+        avanzar(). `run_to_abs_pos()` is a persistent order: the motor
+        keeps driving to that position without the command being
+        repeated. Re-issuing it on every control loop restarted the EV3's
+        position controller every 22 ms, so the ramp never completed and
+        the steering responded in jerks instead of moving cleanly to the
+        commanded angle.
         """
-        # El recorte va por lado. VOLANTE_LIMITE es el techo mecanico y
-        # las fracciones el mando de ajuste; con las dos en 1.0 esto
-        # equivale al recorte simetrico de siempre.
+        # Clamping is per side. VOLANTE_LIMITE is the mechanical ceiling
+        # and the fractions are the tuning knob; with both at 1.0 this is
+        # the plain symmetric clamp.
         #
-        # Se recorta AQUI, que es por donde pasan tanto el seguimiento de
-        # pared como el esquive con camara: asi no hay forma de que algun
-        # camino se salte el limite.
+        # It happens HERE because this is the single point both the wall
+        # following and the camera avoidance pass through, so no path can
+        # bypass the limit.
         tope_derecha = config.VOLANTE_LIMITE * config.VOLANTE_FRACCION_DERECHA
         tope_izquierda = (config.VOLANTE_LIMITE
                           * config.VOLANTE_FRACCION_IZQUIERDA)
@@ -259,38 +259,41 @@ class Robot(object):
         self.volante.run_to_abs_pos()
 
     def girar_por_error(self, error_crudo, kp=None):
-        """Convierte el error de los ultrasonicos en angulo de volante.
+        """Turn the ultrasonic centring error into a steering angle.
 
-        Arath hace map(error, -100, 100, 90-20, 90+20), que es una
-        ganancia de 0.2 grados por unidad de error alrededor del centro.
-        Aqui la ganancia es explicita y el centro es el cero.
+        A plain proportional term: angle = kp * error, clamped by girar().
+        The gain is explicit and the centre is zero.
 
-        `kp` deja que cada programa use la suya: la prueba abierta y la de
-        obstaculos quieren agresividades distintas para el mismo error.
+        `kp` lets each program use its own: the open challenge and the
+        obstacle challenge want different aggressiveness for the same
+        error, because in the obstacle run the wall following is only
+        what happens between blocks, and a high gain there leaves the
+        robot swinging wall to wall just as the camera is about to take
+        over.
         """
         if kp is None:
             kp = config.VOLANTE_KP
         self.girar(kp * error_crudo)
 
     # ----------------------------------------------------------------
-    # Traccion
+    # Drive train
     # ----------------------------------------------------------------
 
     def avanzar(self, velocidad):
-        """Avanza. `velocidad` va de 0 a 100 en los dos modos.
+        """Drive forward. `velocidad` is 0 to 100 in both modes.
 
-        Con TRACCION_MODO = 'velocidad' el numero es el porcentaje de la
-        velocidad maxima del motor y el EV3 regula por encoder: si la
-        rueda se frena contra una imperfeccion de la pista, el
-        controlador sube la potencia hasta recuperar la velocidad pedida.
+        With TRACCION_MODO = 'velocidad' the number is a percentage of
+        the motor's maximum speed and the EV3 regulates using the
+        encoder: if a wheel is slowed by a bump in the track surface, the
+        controller raises power until the commanded speed is recovered.
 
-        Con 'potencia' es el ciclo de trabajo directo, que es lo que hace
-        Arath con su PWM. Es lazo abierto: ante un obstaculo la potencia
-        sigue siendo la misma y el robot se queda clavado. Su motor no
-        tiene encoder y no puede hacer otra cosa; este si.
+        With 'potencia' the number is the raw duty cycle. That is open
+        loop: against an obstacle the power stays the same and the robot
+        just stalls. Velocity mode was chosen after the robot kept
+        bogging down on track imperfections.
 
-        La consigna solo se escribe cuando cambia. A 44 Hz, reescribir
-        los mismos valores en sysfs cada vuelta es trabajo tirado.
+        The command is only written when it changes. At ~44 Hz,
+        rewriting identical values into sysfs every loop is wasted work.
         """
         velocidad = clamp_abs(velocidad, 100)
         if velocidad == self.velocidad:
@@ -315,7 +318,7 @@ class Robot(object):
         self._destino_volante = None
 
     # ----------------------------------------------------------------
-    # Indicadores: sustituyen a la tira WS2812 de Arath
+    # Lap indicator on the brick LEDs
     # ----------------------------------------------------------------
 
     def indicar_vuelta(self, esquinas):

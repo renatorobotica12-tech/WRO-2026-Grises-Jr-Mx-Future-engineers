@@ -1,15 +1,13 @@
-"""Lectura del Arduino Nano multiplexor de cinco ultrasonicos.
+"""Reading the Arduino Nano that multiplexes the five ultrasonic sensors.
 
-Reemplaza al bloque `ARD` de EV3-G y, del lado de Arduino, a las cinco
-llamadas a readUltrasound() del procedimiento `Distancia` de Arath.
+There are two paths, depending on which firmware the Nano is running:
 
-Hay dos caminos segun el firmware que tenga cargado el Nano:
+  'serial' -> ultrasonic_hub_serial, plugged into the brick's USB port
+  'i2c'    -> ultrasonic_hub_packet or ultrasonic_hub, on a sensor port
 
-  'serial' -> ultrasonic_hub_serial, conectado al puerto USB del ladrillo
-  'i2c'    -> ultrasonic_hub_packet o ultrasonic_hub, en un puerto de sensores
-
-El camino serial es el recomendado: el I2C de los puertos de sensores del
-EV3 se genera por software y va a pocos kHz.
+Serial is the recommended path. The I2C on the EV3 sensor ports is not
+hardware: the brick bit-bangs it in software and it runs at a few kHz.
+Going over USB at 115200 baud also frees up a sensor port.
 """
 
 import glob
@@ -21,8 +19,8 @@ from . import config, i2c, ports
 class _HubBase(object):
 
     def __init__(self):
-        self.distancias = [config.ARD_FUERA_DE_RANGO] * 5   # crudas
-        self.utiles = [config.ARD_DISTANCIA_MAXIMA] * 5     # filtradas
+        self.distancias = [config.ARD_FUERA_DE_RANGO] * 5   # raw
+        self.utiles = [config.ARD_DISTANCIA_MAXIMA] * 5     # filtered
         self.validez = 0
         self.trama = -1
         self.tramas_malas = 0
@@ -31,10 +29,10 @@ class _HubBase(object):
         self.ultimo_bueno = [None] * 5
         self.marca_bueno = [0.0] * 5
         self.historia = [[] for _ in range(5)]
-        self.sin_eco = [0] * 5          # cuantas veces se sustituyo cada uno
+        self.sin_eco = [0] * 5          # substitutions made, per sensor
 
     # ----------------------------------------------------------------
-    # Lectura: el subtipo implementa _leer()
+    # Reading: the subclass implements _leer()
     # ----------------------------------------------------------------
 
     def actualizar(self):
@@ -47,11 +45,13 @@ class _HubBase(object):
         raise NotImplementedError
 
     def _filtrar(self):
-        """Convierte las lecturas crudas en distancias utilizables.
+        """Turn raw readings into usable distances.
 
-        Un 125 con el bit de validez bajo no es una distancia: es "no
-        hubo eco". Sustituirlo por la ultima lectura buena evita que un
-        parpadeo de un sensor mande el volante al tope.
+        A 125 with its validity bit low is not a distance: it means "no
+        echo came back". Feeding that number straight into the steering
+        error makes one sensor dropout look like an 80 cm jump, and the
+        steering slams to full lock. Substituting the last good reading
+        instead keeps a brief dropout from doing that.
         """
         if not config.ARD_FILTRAR:
             self.utiles = list(self.distancias)
@@ -67,11 +67,11 @@ class _HubBase(object):
                 valor = crudo
             elif (self.ultimo_bueno[i] is not None
                   and ahora - self.marca_bueno[i] <= config.ARD_RETENCION):
-                # Parpadeo corto: se conserva lo ultimo bueno.
+                # Short dropout: hold the last good reading.
                 valor = self.ultimo_bueno[i]
                 self.sin_eco[i] += 1
             else:
-                # Lleva demasiado sin eco: de verdad no hay pared cerca.
+                # Too long without an echo: there really is no wall near.
                 valor = config.ARD_DISTANCIA_MAXIMA
                 self.sin_eco[i] += 1
 
@@ -84,7 +84,7 @@ class _HubBase(object):
             self.utiles[i] = sorted(historia)[len(historia) // 2]
 
     # ----------------------------------------------------------------
-    # Interpretacion, comun a los dos caminos
+    # Interpretation, shared by both paths
     # ----------------------------------------------------------------
 
     def valido(self, indice):
@@ -103,12 +103,18 @@ class _HubBase(object):
         return self.utiles[config.IDX_FRONTAL]
 
     def error_crudo(self):
-        """Error de centrado entre paredes, en centimetros.
+        """Centring error between the corridor walls, in centimetres.
 
-        Mismo calculo del bloque `ERROR` de EV3-G y del procedimiento
-        `Distancia` de Arath, antes del map a grados de servo:
+            ((left 90 + left 25) - (right 25 + right 90)) * -1
 
-            ((90izq + 25izq) - (25der + 90der)) * -1
+        The sign is what makes the rest of the chain work: if the robot
+        drifts towards the left wall, the left readings drop, the error
+        comes out POSITIVE, and a positive steering command turns right,
+        away from the wall.
+
+        Each side sums two sensors, so a sideways drift moves all four at
+        once: two get closer while two get further away. That is why the
+        error grows about four times faster than the actual displacement.
         """
         return -(sum(self.izquierda) - sum(self.derecha))
 
@@ -117,7 +123,7 @@ class _HubBase(object):
 
 
 class HubSerial(_HubBase):
-    """El Nano por USB. Formato: 'U d1 d2 d3 d4 d5 mascara trama xor'."""
+    """The Nano over USB. Line format: 'U d1 d2 d3 d4 d5 mask frame xor'."""
 
     def __init__(self, puerto=None, baudios=None):
         _HubBase.__init__(self)
@@ -126,9 +132,9 @@ class HubSerial(_HubBase):
 
         from .power import AlimentacionNano
 
-        # Primero la corriente y despues el puerto serie. Al reves, el
-        # Nano arrancaria con el serie ya abierto y se perderian tramas
-        # hasta que terminara de reiniciarse.
+        # Power first, serial port second. The other way round, the Nano
+        # would boot with the serial link already open and frames would
+        # be lost until it finished restarting.
         self.alimentacion = AlimentacionNano()
         self.alimentacion.encender()
 
@@ -139,7 +145,7 @@ class HubSerial(_HubBase):
         self.buffer = b''
         self.sin_datos = 0
 
-        # El Nano se reinicia al abrir el puerto por la linea DTR.
+        # Opening the port toggles DTR, which resets the Nano.
         import time
         time.sleep(config.ARD_ESPERA_ARRANQUE)
         self.serie.reset_input_buffer()
@@ -154,11 +160,11 @@ class HubSerial(_HubBase):
                       'dmesg | tail despues de conectarlo')
 
     def _leer(self):
-        """Se queda con la ultima linea completa que haya llegado.
+        """Keep the most recent complete line that arrived.
 
-        El Nano manda unas 110 lineas por segundo, mas de lo que consume
-        el lazo de control. Se descartan las viejas y se usa la mas
-        reciente para no acumular retraso.
+        The Nano sends about 110 lines per second, far more than the
+        control loop consumes. Older lines are discarded and only the
+        newest is used, so latency does not build up in the buffer.
         """
         pendiente = self.serie.in_waiting
         if pendiente:
@@ -169,7 +175,7 @@ class HubSerial(_HubBase):
             return False
 
         partes = self.buffer.split(b'\n')
-        self.buffer = partes[-1]            # resto incompleto
+        self.buffer = partes[-1]            # incomplete remainder
 
         for linea in reversed(partes[:-1]):
             if self._parsear(linea):
@@ -211,7 +217,7 @@ class HubSerial(_HubBase):
 
 
 class HubI2C(_HubBase):
-    """El Nano en un puerto de sensores, como esclavo I2C."""
+    """The Nano on a sensor port, acting as an I2C slave."""
 
     def __init__(self, direccion_puerto=None, direccion_i2c=None,
                  firmware=None):
@@ -238,8 +244,8 @@ class HubI2C(_HubBase):
             checksum ^= byte
 
         if checksum != datos[7]:
-            # Mejor un dato de hace 20 ms que un salto a 125 cm que manda
-            # el volante al tope.
+            # A reading 20 ms old beats a corrupt jump to 125 cm, which
+            # would send the steering to full lock.
             self.tramas_malas += 1
             return False
 
@@ -249,7 +255,7 @@ class HubI2C(_HubBase):
         return True
 
     def _actualizar_byte_a_byte(self):
-        """Firmware antiguo: se escribe el numero de sensor y se lee un byte."""
+        """Older firmware: write the sensor number, then read one byte."""
         self.tramas_leidas += 1
         for indice in range(5):
             i2c.escribir_bloque(self.bus, self.direccion_i2c, [indice + 1])
@@ -260,7 +266,7 @@ class HubI2C(_HubBase):
 
 
 def crear_hub():
-    """Devuelve el hub segun config.ARD_BACKEND."""
+    """Return the hub selected by config.ARD_BACKEND."""
     if config.ARD_BACKEND == 'serial':
         return HubSerial()
     return HubI2C()

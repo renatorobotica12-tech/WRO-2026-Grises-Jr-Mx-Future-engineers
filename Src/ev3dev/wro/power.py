@@ -1,17 +1,17 @@
-"""Alimentacion del Arduino Nano desde un puerto de motores del EV3.
+"""Powering the Arduino Nano from one of the EV3 motor ports.
 
-El Nano se alimenta del puerto D tratandolo como un motor de corriente
-continua. Los datos siguen yendo por USB; esto es solo corriente.
+The Nano draws its power from port D, driven as if it were a DC motor.
+Data still travels over USB; this is current only.
 
-Por que funciona: un puerto de salida del EV3 entrega la tension de la
-bateria entre sus pines de potencia. A ciclo de trabajo 100 % la salida
-queda continua, no conmutada, que es lo unico que sirve para alimentar
-electronica. A menos de 100 % seria una onda cuadrada y el regulador del
-Nano lo pasaria mal.
+Why it works: an EV3 output port puts the battery voltage across its
+power pins. At 100 % duty cycle the output is continuous rather than
+switched, which is the only form that is usable for powering
+electronics. Below 100 % it would be a square wave and the Nano's
+regulator would struggle with it.
 
-En ev3dev hay que poner el puerto en modo `dc-motor`, porque en `auto` el
-ladrillo no detecta nada (un dispositivo pasivo no tiene identificacion) y
-el puerto se queda en estado `error`.
+The port has to be forced into `dc-motor` mode. In `auto` the brick
+detects nothing, because a passive device has no identification, and the
+port is left in the `error` state.
 """
 
 import time
@@ -37,11 +37,11 @@ class AlimentacionNano(object):
     # ----------------------------------------------------------------
 
     def encender(self):
-        """Da corriente y espera a que el Nano arranque.
+        """Apply power and wait for the Nano to boot.
 
-        Hay que llamarla ANTES de abrir el puerto serie: si se enciende
-        despues, el Nano se reinicia con el serie ya abierto y se pierden
-        tramas hasta que vuelve.
+        Must be called BEFORE opening the serial port. Powering up
+        afterwards restarts the Nano with the serial link already open,
+        and frames are lost until it comes back.
         """
         if self.motor is None:
             return

@@ -1,34 +1,35 @@
-"""Giroscopio: AbsoluteIMU leido desde ev3dev.
+"""Gyroscope: the AbsoluteIMU read through ev3dev.
 
-Cubre lo que en el programa de Arath hace la extension MPU6050
-(`prepararFacil`, `iniciar`, `calibrar`, `actualizar`, `zonaMuerta`,
-`angulo(Z)`, `reiniciarAngulos`) y lo que en EV3-G hacen los bloques
-`IMU_Calibrar_WRO` e `IMU_Giro_WRO`.
+The sensor reports angular velocity. The heading angle is obtained by
+integrating that velocity against real elapsed time, which is what
+docs/BLOQUE_GIRO_ABSOLUTEIMU_EV3.md describes.
 
-El sensor entrega velocidad angular. El angulo se obtiene integrando esa
-velocidad contra el tiempo real transcurrido, igual que el bloque
-IMU_ANGULO documentado en documentos/BLOQUE_GIRO_ABSOLUTEIMU_EV3.md.
+This module owns everything to do with heading: calibrating the zero,
+integrating, applying the dead band, and deciding when a turn counts as
+a track corner.
 """
 
 import time
 
 from . import config, i2c, ports
 
-# Mapa de registros del mindsensors AbsoluteIMU-ACG.
-# Confirmelo contra la hoja de datos antes de confiar en el backend 'raw'.
+# Register map of the mindsensors AbsoluteIMU-ACG.
+# Check this against the datasheet before trusting the 'raw' backend.
 REG_COMANDO = 0x41
-REG_GIRO_X = 0x53                   # 6 bytes: X, Y, Z en 16 bits little endian
+REG_GIRO_X = 0x53                   # 6 bytes: X, Y, Z as 16-bit little endian
 
 
 class _LectorDriver(object):
-    """Usa el driver ms-absolute-imu de ev3dev.
+    """Uses the ev3dev ms-absolute-imu driver.
 
-    En este robot ev3dev detecta el AbsoluteIMU solo, con el puerto en
-    modo `auto`, y lo expone como `ev3-ports:in2:i2c17` (17 = 0x11). Por
-    eso primero se intenta usarlo tal cual: forzar el modo del puerto
-    cuando ya funciona lo desconectaria y habria que reiniciar.
+    On this robot ev3dev detects the AbsoluteIMU on its own, with the
+    port left in `auto`, and exposes it as `ev3-ports:in2:i2c17`
+    (17 = 0x11). That is why we try to use it as-is first: forcing the
+    port mode when it already works would disconnect it and require a
+    reboot.
 
-    El camino manual queda como respaldo por si algun dia no lo detecta.
+    The manual path stays as a fallback in case it ever stops being
+    detected.
     """
 
     def __init__(self):
@@ -44,20 +45,21 @@ class _LectorDriver(object):
                                 config.IMU_DIRECCION)
             self.sensor = Sensor(config.PUERTO_IMU)
 
-        # Arranca en COMPASS; hay que pasarlo a GYRO explicitamente.
+        # It starts up in COMPASS mode; it has to be switched to GYRO
+        # explicitly.
         self.sensor.mode = config.IMU_MODO
 
     def crudo(self):
         return self.sensor.value(config.IMU_EJE)
 
     def crudo_todos(self):
-        """Los tres ejes. Lo usa el diagnostico para averiguar cual es el
-        eje vertical de este montaje."""
+        """All three axes. Used by the diagnostics to work out which axis
+        is the vertical one on this build."""
         return [self.sensor.value(i) for i in range(3)]
 
 
 class _LectorRaw(object):
-    """Lee los registros del giroscopio por I2C directo."""
+    """Reads the gyro registers over direct I2C."""
 
     def __init__(self):
         ports.poner_other_i2c(config.PUERTO_IMU)
@@ -79,7 +81,7 @@ class _LectorRaw(object):
 
 
 class Giroscopio(object):
-    """Velocidad angular calibrada y angulo acumulado del eje elegido."""
+    """Calibrated angular velocity and accumulated angle of one axis."""
 
     def __init__(self, backend=None, escala=None):
         backend = backend or config.IMU_BACKEND
@@ -91,18 +93,18 @@ class Giroscopio(object):
         self.velocidad = 0.0
         self._ultimo = time.time()
 
-        # Conteo de esquinas. Ver es_esquina().
+        # Corner counting. See es_esquina().
         self.esquinas_descartadas = 0
         self._ultima_esquina = 0.0
 
     # ----------------------------------------------------------------
 
     def calibrar(self, muestras=None, mostrar=None):
-        """Promedia el cero con el robot inmovil.
+        """Average the zero offset with the robot standing still.
 
-        Equivale a mpu.calibrar(600) de Arath y a IMU_Calibrar_WRO en EV3-G.
-        Si el robot se mueve durante esta llamada, el conteo de esquinas
-        de toda la carrera queda mal.
+        If the robot moves during this call, corner counting is wrong for
+        the whole run: the offset error integrates into a steady drift of
+        the heading angle.
         """
         muestras = muestras or config.IMU_MUESTRAS_CALIBRACION
         suma = 0.0
@@ -116,20 +118,20 @@ class Giroscopio(object):
         return self.offset
 
     def reiniciar(self):
-        """Pone el angulo acumulado en cero. Equivale a reiniciarAngulos()."""
+        """Zero the accumulated angle."""
         self.grados = 0.0
         self._ultimo = time.time()
 
     def actualizar(self):
-        """Lee el sensor e integra. Llamar una sola vez por vuelta de lazo."""
+        """Read the sensor and integrate. Call once per control loop."""
         ahora = time.time()
         dt = ahora - self._ultimo
         self._ultimo = ahora
 
         velocidad = (self.lector.crudo() - self.offset) * self.escala
 
-        # Zona muerta: por debajo de este ruido se considera quieto, para
-        # que el angulo no derive mientras el robot va recto.
+        # Dead band: below this much noise the robot counts as still, so
+        # the angle does not drift while it is driving straight.
         if abs(velocidad) < config.IMU_ZONA_MUERTA:
             velocidad = 0.0
 
@@ -138,23 +140,24 @@ class Giroscopio(object):
         return self.grados
 
     def es_esquina(self):
-        """True cuando el giro acumulado pasa el umbral de esquina.
+        """True when the accumulated turn passes the corner threshold.
 
-        Reune en un solo sitio lo que antes estaba copiado en open_ard.py
-        y obs_ard.py: comparar contra ANGULO_ESQUINA y reiniciar el
-        angulo. Va aqui para que no puedan volver a divergir.
+        Keeps the threshold test and the angle reset in one place. They
+        used to be copied into both race programs, which is how two
+        copies of the same logic end up drifting apart.
 
-        Ademas descarta las esquinas falsas. El giroscopio no distingue el
-        giro de una esquina de pista del de un esquive de bloque: cuando
-        la camara manda el volante al tope, el robot gira de verdad y
-        acumula los 87 grados igual. Medido en pista: dos esquinas
-        separadas por 1.1 s, cuando las reales iban cada 6.
+        It also discards false corners. The gyroscope cannot tell a track
+        corner from a block avoidance manoeuvre: when the camera sends
+        the steering to full lock, the robot really does turn and really
+        does accumulate 87 degrees. Measured on track: two corners 1.1 s
+        apart, where the real ones were coming every 6 s.
 
-        Por eso una esquina que llega antes de ESQUINA_INTERVALO_MINIMO se
-        da por falsa. El angulo se reinicia igualmente, porque ese giro ya
-        se hizo y arrastrarlo sumaria a la siguiente.
+        So a corner arriving sooner than ESQUINA_INTERVALO_MINIMO is
+        treated as false. The angle is reset anyway, because that turn
+        physically happened and carrying it forward would add to the next
+        corner and trigger it early.
 
-        Llamar una sola vez por vuelta de lazo, despues de actualizar().
+        Call once per control loop, after actualizar().
         """
         if abs(self.grados) < config.ANGULO_ESQUINA:
             return False
