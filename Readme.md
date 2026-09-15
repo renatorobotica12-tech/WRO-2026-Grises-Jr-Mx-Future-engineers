@@ -187,11 +187,9 @@ at 115200 baud removed that bottleneck and freed a sensor port.
 
 ## 📷 Team Photo
 
-<div align="center">
-
-**Insert official team photograph here**
-
-</div>
+<p align="center">
+<img width="650" height="650" alt="Team Los Grises Jr" src="https://github.com/user-attachments/assets/bfdd1ee5-125a-459d-8794-e7c5e245de1f" />
+</p>
 
 
 ---
@@ -396,12 +394,12 @@ These photographs demonstrate:
 
 | Front View | Top View | Right Side |
 |:---:|:---:|:---:|
-| <img src="https://github.com/user-attachments/assets/69e7b572-94bf-416a-b6c8-c6d912f90fd9" width="250"> | <img src="https://github.com/user-attachments/assets/4440147d-9600-491b-a967-1af42e869efa" width="250"> | <img src="https://github.com/user-attachments/assets/d07e3bec-f223-4d49-a879-2c7a64f843c3" width="250"> |
+| <img src="https://github.com/user-attachments/assets/cda4834c-e861-4cab-99fe-fcc4bd93a7c1" width="250"> | <img src="https://github.com/user-attachments/assets/a8d996a3-c94e-4acb-b80b-402d27cab012" width="250"> | <img src="https://github.com/user-attachments/assets/b4fe7623-aa28-47b5-8c4d-c0f5562b56ff" width="250"> |
 
 
 | Left Side | Rear View | Bottom View |
 |:---:|:---:|:---:|
-| <img src="https://github.com/user-attachments/assets/36231890-177c-4a6f-8faf-0d1627496dcb" width="250"> | <img src="https://github.com/user-attachments/assets/5d44d4db-c581-44e0-86bb-8d20cec6b4b8" width="250"> | <img src="https://github.com/user-attachments/assets/47117a61-1927-4884-a85a-d80c9e8139e6" width="250"> |
+| <img src="https://github.com/user-attachments/assets/0792abae-49c0-44d8-9429-07fcfa5de946" width="250"> | <img src="https://github.com/user-attachments/assets/50464d5f-a10d-4e7e-9dd9-c4e258ffa06f" width="250"> | <img src="https://github.com/user-attachments/assets/68f1c6de-017a-494f-a429-26573f21e0ab" width="250"> |
 
 
 </div>
@@ -741,6 +739,10 @@ This modular approach allows each subsystem to be tested independently.
 ---
 
 # 🔌 Custom PCB
+
+<p align="center">
+<img width="750" height="400" alt="Custom interface PCB built around the Arduino Nano" src="https://github.com/user-attachments/assets/46175edd-7dc4-4ecf-b4f8-1c4c24fa290e" />
+</p>
 
 
 One of the most important improvements during development was the creation of a custom Printed Circuit Board.
