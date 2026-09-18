@@ -262,7 +262,9 @@ Her work focuses on:
 
 
 Her contributions have been fundamental in transforming the initial prototype into a competition-ready autonomous vehicle with improved stability and maintainability.
-📸_-----_
+
+<img width="641" height="638" alt="Image" src="https://github.com/user-attachments/assets/830bcb35-5864-4b82-bb87-0a7a0c41f3f6" />
+
 ---
 # 👨‍🏫 Eduardo Alvarado
 
