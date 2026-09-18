@@ -266,6 +266,32 @@ Her contributions have been fundamental in transforming the initial prototype in
 
 📷 **Insert Paulina working on assembly image here**
 
+---
+# 👨‍🏫 Eduardo Alvarado
+
+## <coach of the team>
+
+
+| Information | Details |
+|:---|:---|
+| Role | <Principal coach> |
+| Main Areas | <Coach> |
+
+
+### Responsibilities
+
+- 📋 < Principal Coach>
+- 🎓 <The Coach of the team>
+
+
+---
+
+### About Eduardo Alvarado
+
+<párrafo>
+
+
+---
 
 ---
 
