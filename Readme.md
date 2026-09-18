@@ -185,12 +185,6 @@ at 115200 baud removed that bottleneck and freed a sensor port.
 # 👥 Team
 
 
-## 📷 Team Photo
-
-<p align="center">
-<img width="650" height="650" alt="Team Los Grises Jr" src="https://github.com/user-attachments/assets/bfdd1ee5-125a-459d-8794-e7c5e245de1f" />
-</p>
-
 
 ---
 
