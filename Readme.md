@@ -269,26 +269,26 @@ Her contributions have been fundamental in transforming the initial prototype in
 ---
 # 👨‍🏫 Eduardo Alvarado
 
-## <coach of the team>
+## < coach of the team >
 
 
 | Information | Details |
 |:---|:---|
 | Role | <Principal coach> |
-| Main Areas | <Coach> |
+| Main Areas | <be an Engineer and an experimented coach> |
 
 
 ### Responsibilities
 
-- 📋 < Principal Coach>
-- 🎓 <The Coach of the team>
-
+- 📋 < Teach us >
 
 ---
 
 ### About Eduardo Alvarado
 
-<párrafo>
+< ### About Eduardo Alvarado
+
+Eduardo Alvarado has been working in robotics for 14 years, since 2012. >
 
 
 ---
