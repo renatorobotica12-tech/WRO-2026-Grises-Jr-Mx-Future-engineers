@@ -69,13 +69,18 @@ def main():
     # VELOCIDAD_OBSTACULOS and open_ard uses VELOCIDAD, and confusing
     # them makes a change look like it "did nothing".
     print('--- valores en uso ---')
-    print('VELOCIDAD_OBSTACULOS  : %s   (no VELOCIDAD)'
-          % config.VELOCIDAD_OBSTACULOS)
+    print('VELOCIDAD_OBSTACULOS  : %s'
+          % robot.describir_velocidad(config.VELOCIDAD_OBSTACULOS))
+    print('                        (no VELOCIDAD)')
+    if config.TRACCION_REDUCCION == 1.0:
+        print('  ojo                  : los cm/s suponen toma directa;'
+              ' corra check_hw.py reduccion')
     print('VOLANTE_KP_OBSTACULOS : %s' % config.VOLANTE_KP_OBSTACULOS)
-    print('VOLANTE_LIMITE        : %.1f  (derecha %+.1f, izquierda %+.1f)'
-          % (config.VOLANTE_LIMITE,
-             config.VOLANTE_LIMITE * config.VOLANTE_FRACCION_DERECHA,
-             -config.VOLANTE_LIMITE * config.VOLANTE_FRACCION_IZQUIERDA))
+    print('guardia frontal       : %s a %d cm, solo sin bloque a la vista'
+          % ('ACTIVO' if config.PRECAUCION_ACTIVA_OBSTACULOS else 'apagado',
+             config.PRECAUCION_DISTANCIA_OBSTACULOS))
+    print('TOPES                 : izquierda %+.1f  centro 0  derecha %+.1f'
+          % (config.VOLANTE_TOPE_IZQUIERDO, config.VOLANTE_TOPE_DERECHO))
     print('camara: ROJO id %d target %+d / VERDE id %d target %+d'
           % (config.HUSKY_ID_ROJO, config.HUSKY_TARGET_ROJO,
              config.HUSKY_ID_VERDE, config.HUSKY_TARGET_VERDE))
@@ -86,10 +91,28 @@ def main():
 
     esperar_boton(boton, sonido)
 
+    correr(robot, hub, giro, camara, boton, sonido)
+
+
+def correr(robot, hub, giro, camara, boton, sonido):
+    """The race itself, on hardware somebody else set up.
+
+    Split out from main() so the run can be started from another
+    program with the robot already prepared -- salida.py chains
+    straight into it once it is out of the parking bay, and a second
+    steering calibration and a second button press between the two
+    would make no sense there.
+
+    Everything before this point in main() is preparation that only
+    needs doing once: finding the steering centre, calibrating the
+    gyroscope, and waiting for the start button.
+    """
     # The angle is zeroed at START, not at calibration time. A long wait
     # can pass between the two while the button is pressed, and any gyro
     # drift or nudge of the robot during that wait would add to the first
-    # corner and trigger it early.
+    # corner and trigger it early. Coming from salida.py the gap is not a
+    # wait but a whole manoeuvre, which makes this more necessary rather
+    # than less.
     giro.reiniciar()
 
     esquinas = 0
@@ -99,6 +122,9 @@ def main():
     vueltas = 0
     vistos = 0
     retenidas = 0
+    retrocesos = 0
+    seguidos = 0
+    guardia_activo = config.PRECAUCION_ACTIVA_OBSTACULOS
     inicio = time.time()
 
     try:
@@ -112,6 +138,48 @@ def main():
             camara.actualizar()
             hub.actualizar()
             angulo = giro.actualizar()
+
+            # The camera's verdict is needed before the guard can decide
+            # anything, so it is read here rather than at step 4 where it
+            # is used. One call either way.
+            angulo_camara = camara.angulo_esquive_retenido()
+
+            # 1b. Front collision guard, and the condition that makes it
+            #     usable in this run: it only looks while the camera is
+            #     NOT commanding.
+            #
+            #     The two would otherwise fight. Going round a block, the
+            #     thing filling the front sensor IS the block, and closing
+            #     on it is the whole manoeuvre; a guard would reverse out
+            #     of it and the camera would drive back in, taking turns
+            #     undoing each other until the run ended.
+            #
+            #     With the camera silent, a wall ahead is what it looks
+            #     like: the same failure as in the open challenge, where
+            #     the difference between the two sides goes to zero
+            #     square on to a wall and the controller reports that all
+            #     is well.
+            if (guardia_activo
+                    and angulo_camara is None
+                    and hub.frontal < config.PRECAUCION_DISTANCIA_OBSTACULOS):
+                antes = hub.frontal
+                retrocesos += 1
+                robot.retroceder(mientras=giro.actualizar)
+                hub.actualizar()
+                print('PRECAUCION: %.0f cm al frente sin bloque a la vista, '
+                      'retrocedio %d grados, ahora %.0f cm'
+                      % (antes, robot.recorrido_retroceso, hub.frontal))
+
+                if hub.frontal <= antes + 1:
+                    seguidos += 1
+                    if seguidos >= config.PRECAUCION_MAXIMOS_SEGUIDOS:
+                        guardia_activo = False
+                        print('PRECAUCION: %d retrocesos seguidos sin que se '
+                              'despeje. Guardia APAGADO para esta corrida.'
+                              % seguidos)
+                else:
+                    seguidos = 0
+                continue
 
             # 2. Corner counting. es_esquina() discards the false ones:
             #    while avoiding a block the steering goes to full lock
@@ -143,9 +211,7 @@ def main():
             #    adapter switching between two blocks in view. Without
             #    it, every isolated dropout handed control back to wall
             #    following, which at that instant sent the steering to
-            #    full lock. See husky.py.
-            angulo_camara = camara.angulo_esquive_retenido()
-
+            #    full lock. See husky.py. Already read at step 1.
             if angulo_camara is not None:
                 vistos += 1
                 robot.girar(angulo_camara)
@@ -203,6 +269,15 @@ def main():
     print('tramas malas del Nano: %d de %d'
           % (hub.tramas_malas, hub.tramas_leidas))
     print('lecturas sin eco sustituidas, por sensor: %s' % hub.sin_eco)
+    print('de esas, estimadas de la pareja del lado   : %s' % hub.estimados)
+    print('frontal sostenido por prudencia            : %d' % hub.pesimistas)
+    if not config.PRECAUCION_ACTIVA_OBSTACULOS:
+        nota = '  (guardia OFF)'
+    elif not guardia_activo:
+        nota = '  (guardia se APAGO solo)'
+    else:
+        nota = ''
+    print('retrocesos de precaucion: %d%s' % (retrocesos, nota))
     sonido.beep()
 
 

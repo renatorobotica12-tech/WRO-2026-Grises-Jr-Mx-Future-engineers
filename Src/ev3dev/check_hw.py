@@ -8,7 +8,9 @@ guessing them wrong produces failures that look like software bugs:
   1. which frame index belongs to which ultrasonic sensor;
   2. what IMU_ESCALA is, and with which sign;
   3. which way the steering turns for a positive angle;
-  4. how far the steering actually travels, stop to stop.
+  4. how far the steering actually travels, stop to stop;
+  5. the reduction between the drive motor and the rear wheel, which is
+     what makes a speed in cm/s mean anything.
 
 Every command here either only reads, or says plainly that it moves the
 robot.
@@ -26,10 +28,12 @@ Usage:
     python3 check_hw.py motores     confirm which motor is which
     python3 check_hw.py topes       measure the steering travel
     python3 check_hw.py volante     steering direction
+    python3 check_hw.py reduccion   motor-to-wheel reduction, for cm/s
     python3 check_hw.py parar       stop motors and cut power
 """
 
 import glob
+import math
 import os
 import sys
 import time
@@ -684,6 +688,76 @@ def volante():
     print('lo aleja de la pared izquierda. Si no, cambie VOLANTE_SIGNO.')
 
 
+def reduccion():
+    """Measure the reduction between the drive motor and the rear wheel.
+
+    This is the number TRACCION_REDUCCION, and it is what turns a speed
+    in cm/s into a motor command. Without it the centimetres in
+    wro/config.py are an assumption of direct drive.
+
+    The method needs no instruments: the motor's own encoder is the
+    instrument. Turn a rear wheel exactly one full turn by hand and read
+    how far the motor turned. If the wheel drives the motor through a
+    3:1 reduction, one wheel turn is three motor turns, and the encoder
+    reports 1080 degrees.
+
+    Turn it SLOWLY. The point is the total, not the speed, and a fast
+    spin can make the driver miss counts.
+    """
+    from ev3dev2.motor import Motor
+
+    motor = Motor(config.PUERTO_TRACCION)
+    motor.stop_action = 'coast'
+    motor.stop()
+
+    print('Motor de traccion en %s.' % config.PUERTO_TRACCION)
+    print()
+    print('Marque un punto de la rueda TRASERA, la negra, y pongalo abajo')
+    print('tocando el piso. Levante el robot para que la rueda gire libre.')
+    print()
+
+    input('Enter cuando este listo, sin haber girado nada todavia... ')
+    inicio = motor.position
+
+    print()
+    print('Ahora gire la rueda UNA vuelta completa, despacio, hasta que la')
+    print('marca vuelva a quedar abajo.')
+    input('Enter cuando la marca este otra vez abajo... ')
+
+    recorrido = abs(motor.position - inicio)
+    if recorrido == 0:
+        print()
+        print('El encoder no se movio. O la rueda no esta conectada al motor')
+        print('que dice PUERTO_TRACCION, o no giro. Confirme con')
+        print('`check_hw.py motores` cual motor es la traccion.')
+        return
+
+    n = recorrido / 360.0
+    circunferencia_cm = math.pi * config.RUEDA_TRASERA_DIAMETRO / 10.0
+    maxima = motor.max_speed / 360.0 / n * circunferencia_cm
+
+    print()
+    print('--- resultado ---')
+    print('el motor giro %d grados para una vuelta de rueda' % recorrido)
+    print()
+    print('    TRACCION_REDUCCION = %.3f' % n)
+    print()
+    if n > 1.05:
+        print('Va reducido %.2f a 1: el motor gira mas que la rueda, y eso' % n)
+        print('cambia par por velocidad.')
+    elif n < 0.95:
+        print('Va multiplicado: la rueda gira mas que el motor.')
+    else:
+        print('Es toma directa, o casi. El 1.0 que trae el config estaba bien.')
+    print()
+    print('Con esta reduccion y la rueda de %.1f mm, este robot llega a'
+          % config.RUEDA_TRASERA_DIAMETRO)
+    print('%.1f cm/s. Ese es el techo de VELOCIDAD en cm_s.' % maxima)
+    print()
+    print('Repitalo dos o tres veces. Si sale distinto cada vez, gire mas')
+    print('despacio: el error es de conteo, no del mecanismo.')
+
+
 COMANDOS = {
     'parar': parar,
     'puertos': puertos,
@@ -698,6 +772,7 @@ COMANDOS = {
     'motores': motores,
     'topes': topes,
     'volante': volante,
+    'reduccion': reduccion,
 }
 
 if __name__ == '__main__':

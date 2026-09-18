@@ -11,9 +11,23 @@ Going over USB at 115200 baud also frees up a sensor port.
 """
 
 import glob
+import math
 import time
 
 from . import config, i2c, ports
+
+# Which sensor can stand in for which, and by how much.
+#
+# Each side carries a perpendicular sensor and one at 25 degrees, both
+# looking at the same wall, so r25 = r90 / cos(25). Built from the port
+# mapping rather than written out, so re-mapping the sensors in config
+# carries these with it.
+_COS25 = math.cos(math.radians(25))
+_PAREJAS = {}
+for _perp, _ang in ((config.IDX_IZQ[0], config.IDX_IZQ[1]),
+                    (config.IDX_DER[1], config.IDX_DER[0])):
+    _PAREJAS[_ang] = (_perp, 1.0 / _COS25)   # estimate the 25 from the 90
+    _PAREJAS[_perp] = (_ang, _COS25)         # and the 90 from the 25
 
 
 class _HubBase(object):
@@ -30,13 +44,39 @@ class _HubBase(object):
         self.marca_bueno = [0.0] * 5
         self.historia = [[] for _ in range(5)]
         self.sin_eco = [0] * 5          # substitutions made, per sensor
+        self.lecturas_fallidas = 0      # reads that raised, see actualizar()
+        self.estimados = [0] * 5        # readings taken from the partner
+        self.pesimistas = 0             # front readings held, see _frente_pesimista
 
     # ----------------------------------------------------------------
     # Reading: the subclass implements _leer()
     # ----------------------------------------------------------------
 
     def actualizar(self):
-        ok = self._leer()
+        """Read once and filter. Never raises on a bad read.
+
+        A read that fails is treated exactly like a frame that did not
+        arrive, because that is what it is. Letting the exception out
+        ends the run instead, and it did, on track:
+
+            serial.serialutil.SerialException: read failed: device
+            reports readiness to read but returned no data
+
+        in the middle of an approach, with the robot centimetres from a
+        wall. The filter already knows how to cope with a missing frame
+        -- it holds the last good reading for ARD_RETENCION and then
+        falls back to "no wall nearby" -- so a dropped read is a case it
+        is built for, and one bad read is not a reason to abandon a run.
+
+        The failures are counted rather than hidden. A handful across a
+        run is a glitch; a steady stream is a cable, a connector, or the
+        Nano browning out, and the count is what tells those apart.
+        """
+        try:
+            ok = self._leer()
+        except Exception:
+            self.lecturas_fallidas += 1
+            ok = False
         if ok:
             self._filtrar()
         return ok
@@ -71,8 +111,39 @@ class _HubBase(object):
                 valor = self.ultimo_bueno[i]
                 self.sin_eco[i] += 1
             else:
-                # Too long without an echo: there really is no wall near.
-                valor = config.ARD_DISTANCIA_MAXIMA
+                # Too long without an echo. Before concluding there is
+                # no wall, ask this sensor's partner.
+                #
+                # The two sensors on a side look at the SAME wall, one
+                # perpendicular and one at 25 degrees, so either can
+                # estimate the other:
+                #
+                #     r25 = r90 / cos(25) = 1.103 * r90
+                #
+                # This matters more than it sounds. Substituting
+                # ARD_DISTANCIA_MAXIMA puts 100 cm into one side of an
+                # error built from four readings, which swings it by
+                # about that much. A track run showed the cost: one
+                # sensor lost its echo on 777 frames out of 3483, 22 %
+                # of the run, and the centring error swung to -183 and
+                # +181 in a one metre corridor where it cannot exceed
+                # about 100. The steering spent the race pinned to its
+                # stop, following the substitution rather than the wall.
+                #
+                # The partner is only used when it has a real reading of
+                # its own. Two failed sensors on one side still means no
+                # wall.
+                estimado = self._estimar_de_pareja(i, ahora)
+                if estimado is not None:
+                    valor = estimado
+                    self.estimados[i] += 1
+                elif self._frente_pesimista(i, ahora):
+                    # The front sensor, still holding its last reading
+                    # well past ARD_RETENCION. See _frente_pesimista().
+                    valor = self.ultimo_bueno[i]
+                    self.pesimistas += 1
+                else:
+                    valor = config.ARD_DISTANCIA_MAXIMA
                 self.sin_eco[i] += 1
 
             valor = min(valor, config.ARD_DISTANCIA_MAXIMA)
@@ -86,6 +157,74 @@ class _HubBase(object):
     # ----------------------------------------------------------------
     # Interpretation, shared by both paths
     # ----------------------------------------------------------------
+
+    def _frente_pesimista(self, i, ahora):
+        """Should the front sensor keep its last reading instead of
+        being declared clear?
+
+        The front sensor has no partner, and for it the two possible
+        substitutions are not equally safe.
+
+        An ultrasonic aimed obliquely at a wall gets no echo back: the
+        pulse reflects away rather than returning. So the front sensor
+        falls silent exactly when the robot arrives at a wall at an
+        angle -- the moment its reading matters most -- and it also
+        falls silent below about 2 cm, when the wall is as close as it
+        can be. In both cases silence means "wall", and substituting
+        ARD_DISTANCIA_MAXIMA tells the robot the opposite.
+
+        That is what was happening on track. The front lost its echo,
+        the filter reported 100 cm, and the collision guard stopped
+        reacting to a wall that was still there; the run was saved by
+        someone picking the robot up.
+
+        So a silent front keeps its last good reading, which is
+        pessimistic and therefore safe, for ARD_FRENTE_PESIMISTA_S. Past
+        that the silence probably is an empty corridor -- a wall does
+        not stay unmeasurable for seconds while the robot moves -- and
+        the normal substitution takes over, because a robot that creeps
+        for ever because of one stale reading is no use either.
+        """
+        if not config.ARD_FRENTE_PESIMISTA:
+            return False
+        if i != config.IDX_FRONTAL:
+            return False
+        if self.ultimo_bueno[i] is None:
+            return False
+        return (ahora - self.marca_bueno[i]
+                <= config.ARD_FRENTE_PESIMISTA_S)
+
+    def _estimar_de_pareja(self, i, ahora):
+        """Estimate sensor `i` from the other one on its side.
+
+        Returns None when there is no partner, when the partner has no
+        recent reading of its own, or when the feature is switched off.
+
+        The pairs come from IDX_IZQ and IDX_DER, and within each the
+        perpendicular one and the 25 degree one see the same wall. The
+        conversion is the same cosine the wall-centring geometry uses,
+        so this introduces no new assumption about the track: if the
+        robot is far from parallel both readings are wrong together
+        anyway, and the estimate is no worse than the sensor it stands
+        in for.
+        """
+        if not config.ARD_ESTIMAR_PAREJA:
+            return None
+
+        pareja = _PAREJAS.get(i)
+        if pareja is None:
+            return None
+        otro, factor = pareja
+
+        # The partner must have a reading of its own from this frame or
+        # very recently -- not one that is itself a substitution.
+        if self.ultimo_bueno[otro] is None:
+            return None
+        if ahora - self.marca_bueno[otro] > config.ARD_RETENCION:
+            return None
+
+        return min(self.ultimo_bueno[otro] * factor,
+                   config.ARD_DISTANCIA_MAXIMA)
 
     def valido(self, indice):
         return bool(self.validez & (1 << indice))
@@ -101,6 +240,35 @@ class _HubBase(object):
     @property
     def frontal(self):
         return self.utiles[config.IDX_FRONTAL]
+
+    @property
+    def frontal_crudo(self):
+        """The front sensor's own latest number, unfiltered. None if the
+        last frame had no echo.
+
+        `frontal` is the right reading for steering: the median kills
+        spikes and the hold rides out dropouts, and neither matters over
+        the distances wall following works at.
+
+        It is the wrong reading for stopping close to something. Both of
+        those mechanisms delay the fall. Closing on a wall, the echo
+        starts failing before the robot arrives, and the filter answers
+        with the last GOOD value -- four centimetres, say -- for
+        ARD_RETENCION afterwards. A threshold below that is never
+        crossed, and the robot keeps going while the reading insists it
+        has not arrived yet.
+
+        This returns what the sensor measured on the last frame, or None
+        when it measured nothing. A caller that has to react at a
+        distance rather than track one wants this.
+        """
+        i = config.IDX_FRONTAL
+        if not self.valido(i):
+            return None
+        crudo = self.distancias[i]
+        if crudo >= config.ARD_FUERA_DE_RANGO:
+            return None
+        return crudo
 
     def error_crudo(self):
         """Centring error between the corridor walls, in centimetres.
