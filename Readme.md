@@ -32,14 +32,6 @@
 
 ---
 
-# 📷 Final Competition Robot
-
-**Insert final robot hero image here**
-
-*(Recommended image: front three-quarter view showing the complete vehicle)*
-
----
-
 ### Official Engineering Repository
 
 Documentation of Team Los Grises Jr's autonomous vehicle developed for:
