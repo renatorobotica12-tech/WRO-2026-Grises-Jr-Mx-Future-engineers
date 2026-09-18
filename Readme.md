@@ -262,10 +262,7 @@ Her work focuses on:
 
 
 Her contributions have been fundamental in transforming the initial prototype into a competition-ready autonomous vehicle with improved stability and maintainability.
-
-
-📷 **Insert Paulina working on assembly image here**
-
+📸_-----_
 ---
 # 👨‍🏫 Eduardo Alvarado
 
